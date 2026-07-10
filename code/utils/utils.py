@@ -113,22 +113,28 @@ def apply_thresholds(preds, thresholds):
 
 # DATA PROCESSING STUFF
 
-def load_dataset(path, sampling_rate, release=False):
-    if path.split('/')[-2] == 'ptbxl':
-        # load and convert annotation data
-        Y = pd.read_csv(path+'ptbxl_database.csv', index_col='ecg_id')
-        Y.scp_codes = Y.scp_codes.apply(lambda x: ast.literal_eval(x))
+def load_dataset(path, sampling_rate, release=False, database_filename=None, dataset_type=None):
+    path = os.path.normpath(path).replace('\\', '/')
+    if path and not path.endswith('/'):
+        path += '/'
 
-        # Load raw signal data
+    if dataset_type is None:
+        dataset_type = path.split('/')[-2]
+
+    if dataset_type == 'ptbxl':
+        filename = database_filename if database_filename else 'ptbxl_database.csv'
+        Y = pd.read_csv(path + filename, index_col='ecg_id')
+        Y.scp_codes = Y.scp_codes.apply(lambda x: ast.literal_eval(x))
         X = load_raw_data_ptbxl(Y, sampling_rate, path)
 
-    elif path.split('/')[-2] == 'ICBEB':
-        # load and convert annotation data
-        Y = pd.read_csv(path+'icbeb_database.csv', index_col='ecg_id')
+    elif dataset_type == 'ICBEB':
+        filename = database_filename if database_filename else 'icbeb_database.csv'
+        Y = pd.read_csv(path + filename, index_col='ecg_id')
         Y.scp_codes = Y.scp_codes.apply(lambda x: ast.literal_eval(x))
-
-        # Load raw signal data
         X = load_raw_data_icbeb(Y, sampling_rate, path)
+
+    else:
+        raise ValueError(f"Unknown dataset_type '{dataset_type}'. Expected 'ptbxl' or 'ICBEB'.")
 
     return X, Y
 

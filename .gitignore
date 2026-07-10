@@ -24,3 +24,16 @@ data/
 *.pth
 *.pkl
 *.wfdb
+
+# Generated training outputs
+output/
+
+# Model checkpoints
+*.pth
+*.pt
+*.ckpt
+
+# Python temporary files
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/

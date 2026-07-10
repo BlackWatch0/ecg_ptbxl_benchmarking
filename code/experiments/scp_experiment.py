@@ -5,13 +5,14 @@ import pandas as pd
 import numpy as np
 import multiprocessing
 from itertools import repeat
+from pathlib import Path
 
 class SCP_Experiment():
     '''
         Experiment on SCP-ECG statements. All experiments based on SCP are performed and evaluated the same way.
     '''
 
-    def __init__(self, experiment_name, task, datafolder, outputfolder, models, sampling_frequency=100, min_samples=0, train_fold=8, val_fold=9, test_fold=10, folds_type='strat'):
+    def __init__(self, experiment_name, task, datafolder, outputfolder, models, sampling_frequency=100, min_samples=0, train_fold=8, val_fold=9, test_fold=10, folds_type='strat', database_filename=None, dataset_type=None, skip_training=False):
         self.models = models
         self.min_samples = min_samples
         self.task = task
@@ -23,6 +24,9 @@ class SCP_Experiment():
         self.outputfolder = outputfolder
         self.datafolder = datafolder
         self.sampling_frequency = sampling_frequency
+        self.database_filename = database_filename
+        self.dataset_type = dataset_type
+        self.skip_training = skip_training
 
         # create folder structure if needed
         if not os.path.exists(self.outputfolder+self.experiment_name):
@@ -36,7 +40,7 @@ class SCP_Experiment():
 
     def prepare(self):
         # Load PTB-XL data
-        self.data, self.raw_labels = utils.load_dataset(self.datafolder, self.sampling_frequency)
+        self.data, self.raw_labels = utils.load_dataset(self.datafolder, self.sampling_frequency, database_filename=self.database_filename, dataset_type=self.dataset_type)
 
         # Preprocess label data
         self.labels = utils.compute_label_aggregations(self.raw_labels, self.datafolder, self.task)
@@ -108,12 +112,15 @@ class SCP_Experiment():
                 assert(True)
                 break
 
-            # fit model
-            model.fit(self.X_train, self.y_train, self.X_val, self.y_val)
-            # predict and dump
-            model.predict(self.X_train).dump(mpath+'y_train_pred.npy')
-            model.predict(self.X_val).dump(mpath+'y_val_pred.npy')
-            model.predict(self.X_test).dump(mpath+'y_test_pred.npy')
+            if self.skip_training and modeltype == "fastai_model":
+                self._predict_with_pretrained(model, modelname, mpath)
+            else:
+                # fit model
+                model.fit(self.X_train, self.y_train, self.X_val, self.y_val)
+                # predict and dump
+                model.predict(self.X_train).dump(mpath+'y_train_pred.npy')
+                model.predict(self.X_val).dump(mpath+'y_val_pred.npy')
+                model.predict(self.X_test).dump(mpath+'y_test_pred.npy')
 
         modelname = 'ensemble'
         # create ensemble predictions via simple mean across model predictions (except naive predictions)
@@ -135,6 +142,35 @@ class SCP_Experiment():
         np.array(ensemble_train).mean(axis=0).dump(ensemblepath + 'y_train_pred.npy')
         np.array(ensemble_test).mean(axis=0).dump(ensemblepath + 'y_test_pred.npy')
         np.array(ensemble_val).mean(axis=0).dump(ensemblepath + 'y_val_pred.npy')
+
+    def _predict_with_pretrained(self, model, modelname, mpath):
+        import torch
+        weight_path = Path(mpath) / 'models' / (modelname + '.pth')
+        if not weight_path.exists():
+            print(f"Pre-trained weight not found at {weight_path}, training from scratch...")
+            model.fit(self.X_train, self.y_train, self.X_val, self.y_val)
+        else:
+            print(f"Loading pre-trained weights from {weight_path}...")
+            checkpoint = torch.load(str(weight_path), map_location='cpu', weights_only=False)
+            state = checkpoint.get('model', checkpoint)
+            pretrained_classes = None
+            for key in reversed(list(state.keys())):
+                if hasattr(state[key], 'shape'):
+                    pretrained_classes = state[key].shape[0]
+                    break
+
+            current_classes = self.Y.shape[1]
+            if pretrained_classes and pretrained_classes != current_classes:
+                print(f"Warning: Pre-trained classes ({pretrained_classes}) != current classes ({current_classes}). "
+                      f"Using pre-trained class count for predictions.")
+                from models.fastai_model import fastai_model
+                model = fastai_model(modelname, pretrained_classes, self.sampling_frequency, mpath,
+                                     self.input_shape, **model.__dict__)
+
+        model.predict(self.X_train).dump(mpath + 'y_train_pred.npy')
+        model.predict(self.X_val).dump(mpath + 'y_val_pred.npy')
+        model.predict(self.X_test).dump(mpath + 'y_test_pred.npy')
+        print(f"Predictions saved for {modelname}")
 
     def evaluate(self, n_bootstraping_samples=100, n_jobs=20, bootstrap_eval=False, dumped_bootstraps=True):
 

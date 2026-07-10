@@ -7,9 +7,12 @@ from configs.wavelet_configs import *
 
 def main():
     
-    datafolder = '../data/ptbxl/'
+    datafolder = '../data/ptbxl_clean_no_noise/'
     datafolder_icbeb = '../data/ICBEB/'
     outputfolder = '../output/'
+
+    database_filename = 'ptbxl_database_clean_no_noise.csv'
+    dataset_type = 'ptbxl'
 
     models = [
         conf_fastai_xresnet1d101,
@@ -35,7 +38,7 @@ def main():
        ]
 
     for name, task in experiments:
-        e = SCP_Experiment(name, task, datafolder, outputfolder, models)
+        e = SCP_Experiment(name, task, datafolder, outputfolder, models, database_filename=database_filename, dataset_type=dataset_type)
         e.prepare()
         e.perform()
         e.evaluate()
