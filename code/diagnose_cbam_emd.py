@@ -4,12 +4,18 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import warnings
 from sklearn.metrics import accuracy_score, average_precision_score, f1_score, roc_auc_score
 
 
 def bce_from_probabilities(y_true, probabilities):
     probabilities = np.clip(probabilities, 1e-7, 1 - 1e-7)
     return float(-(y_true * np.log(probabilities) + (1 - y_true) * np.log(1 - probabilities)).mean())
+
+
+def bce_from_logits(y_true, logits):
+    logits = np.asarray(logits, dtype=np.float64)
+    return float(np.maximum(logits, 0).mean() - (logits * y_true).mean() + np.log1p(np.exp(-np.abs(logits))).mean())
 
 
 def safe_auc(y_true, y_prob, metric):
@@ -71,6 +77,14 @@ def main():
     y_prob = np.load(model_root / 'y_val_pred.npy', allow_pickle=True)
     if y_prob.shape != y_val.shape:
         raise ValueError('Validation predictions {} do not match labels {}'.format(y_prob.shape, y_val.shape))
+    if not np.isfinite(y_prob).all() or y_prob.min() < 0 or y_prob.max() > 1:
+        raise ValueError('y_val_pred.npy must contain finite probabilities in [0, 1]')
+    if y_prob.min() >= 0.5:
+        warnings.warn('All probabilities are >= 0.5. Check whether sigmoid was applied twice.')
+    logits_path = model_root / 'y_val_logits.npy'
+    y_logits = np.load(logits_path, allow_pickle=True) if logits_path.exists() else None
+    if y_logits is not None and y_logits.shape != y_val.shape:
+        raise ValueError('Validation logits {} do not match labels {}'.format(y_logits.shape, y_val.shape))
     report = {}
     report.update(label_summary(y_train, 'train'))
     report.update(label_summary(y_val, 'val'))
@@ -78,15 +92,28 @@ def main():
     all_negative = np.full_like(y_val, 1e-7, dtype=float)
     priors = np.clip(y_train.mean(axis=0), 1e-7, 1 - 1e-7)
     prior_predictions = np.tile(priors, (len(y_val), 1))
-    report['model_valid_bce'] = bce_from_probabilities(y_val, y_prob)
+    report['model_valid_bce'] = bce_from_logits(y_val, y_logits) if y_logits is not None else bce_from_probabilities(y_val, y_prob)
+    report['model_valid_bce_source'] = 'raw_logits' if y_logits is not None else 'aggregated_probabilities'
     report['all_negative_valid_bce'] = bce_from_probabilities(y_val, all_negative)
     report['class_prior_valid_bce'] = bce_from_probabilities(y_val, prior_predictions)
     report['mean_prediction_probability'] = float(y_prob.mean())
+    report['probability_min'] = float(y_prob.min())
+    report['probability_max'] = float(y_prob.max())
+    report['probability_percentiles'] = {
+        str(percentile): float(np.percentile(y_prob, percentile))
+        for percentile in [1, 5, 25, 50, 75, 95, 99]
+    }
+    if y_logits is not None:
+        report['raw_logits_min'] = float(y_logits.min())
+        report['raw_logits_max'] = float(y_logits.max())
+        report['raw_logits_mean'] = float(y_logits.mean())
     for threshold in args.thresholds:
         metrics = multilabel_metrics(y_val, y_prob, threshold)
         report['threshold_{}'.format(threshold)] = {
             key: value for key, value in metrics.items() if not key.startswith('per_class_')
         }
+        report['threshold_{}'.format(threshold)]['valid_auc_class_count'] = int(np.isfinite(metrics['per_class_roc_auc']).sum())
+        report['threshold_{}'.format(threshold)]['excluded_auc_class_count'] = int(np.isnan(metrics['per_class_roc_auc']).sum())
         per_class = pd.DataFrame({
             'class_index': range(y_val.shape[1]),
             'positive_support': y_val.sum(axis=0).astype(int),

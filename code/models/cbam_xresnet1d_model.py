@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import torch
+import warnings
 from torch.utils.data import Dataset
 from pathlib import Path
 from functools import partial
@@ -170,12 +171,25 @@ class cbam_xresnet1d_model(ClassificationModel):
         history.to_csv(str(self.outputfolder / 'training_history.csv'), index=False)
 
     def predict(self, X, full_sequence=True):
+        probabilities = self._predict(X)
+        if not np.isfinite(probabilities).all():
+            raise ValueError('Prediction probabilities contain NaN or infinite values')
+        if probabilities.min() < 0 or probabilities.max() > 1:
+            raise ValueError('Fastai get_preds did not return probabilities')
+        if probabilities.min() >= 0.5:
+            warnings.warn('All probabilities are >= 0.5. Check prediction activation handling.')
+        print('probability min/max/mean:', probabilities.min(), probabilities.max(), probabilities.mean())
+        return probabilities
+
+    def predict_logits(self, X):
+        return self._predict(X, activ=lambda output: output)
+
+    def _predict(self, X, activ=None):
         samples = self._coerce_samples(X)
         labels = [np.ones(self.num_classes, dtype=np.float32) for _ in samples]
         learner = self._get_learner(samples, labels, samples, labels)
         learner.load(self.name)
-        predictions, _ = learner.get_preds()
-        predictions = torch.sigmoid(predictions)
+        predictions, _ = learner.get_preds(activ=activ)
         idmap = np.asarray(learner.data.valid_ds.get_id_mapping())
         aggregate_fn = np.mean if self.aggregate_fn == 'mean' else np.amax
         return aggregate_predictions(to_np(predictions), idmap=idmap, aggregate_fn=aggregate_fn)
