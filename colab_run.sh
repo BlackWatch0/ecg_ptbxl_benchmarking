@@ -16,7 +16,7 @@ if [[ "${MODE}" != "--prepare" && "${MODE}" != "--validate" && "${MODE}" != "--t
   exit 2
 fi
 
-python -m pip install -q gdown wfdb
+python -m pip install -q gdown wfdb py7zr
 mkdir -p "${DOWNLOAD_ROOT}"
 
 if [[ "${MODE}" == "--prepare" || "${MODE}" == "--train" ]]; then

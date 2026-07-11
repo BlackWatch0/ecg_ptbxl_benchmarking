@@ -17,7 +17,7 @@ TARGETS = {
 }
 
 
-def extract(archive, destination):
+def extract(archive, destination, asset):
     archive = Path(archive)
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
@@ -28,7 +28,26 @@ def extract(archive, destination):
         with tarfile.open(archive) as file:
             file.extractall(destination)
     else:
-        raise ValueError('Unsupported archive format: {}'.format(archive))
+        try:
+            import py7zr
+            is_7z = py7zr.is_7zfile(archive)
+        except ImportError:
+            is_7z = False
+        if is_7z:
+            with py7zr.SevenZipFile(archive, mode='r') as file:
+                file.extractall(destination)
+        elif asset == 'emd':
+            try:
+                header = Path(archive).open('r', encoding='utf-8').readline()
+            except UnicodeDecodeError:
+                header = ''
+            if 'RecordNumber' not in header:
+                raise ValueError('Unsupported archive format: {}'.format(archive))
+            target = destination / 'emd_features' / 'original'
+            target.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(archive, target / MARKERS['emd'])
+        else:
+            raise ValueError('Unsupported archive format: {}'.format(archive))
 
 
 def locate(root, marker, asset):
@@ -49,7 +68,7 @@ def prepare(asset, archive, data_root, workspace, replace=False):
     staging = Path(workspace) / '{}_extracted'.format(asset)
     if staging.exists():
         shutil.rmtree(staging)
-    extract(archive, staging)
+    extract(archive, staging, asset)
     source = locate(staging, MARKERS[asset], asset)
     if target.exists():
         shutil.rmtree(target)
