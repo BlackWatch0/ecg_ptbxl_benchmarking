@@ -11,7 +11,7 @@
 | 变更项 | 说明 |
 |---|---|
 | **推理管线** | `run_inference.py` — 以纯推理模式运行 fastai 模型（`skip_training=True`） |
-| **Lightning 支持** | `run_lightning_inference.py` — 直接加载 PyTorch Lightning 检查点，无需 fastai |
+| **Lightning 支持** | `run_lightning_inference.py` 提供 XResNet 推理；`evaluate_noisy_mixed_lightning.py` 严格加载全部现有架构 |
 | **自定义数据集** | `load_dataset()` 新增 `database_filename` 和 `dataset_type` 参数，支持使用清洗后的 CSV |
 | **预训练权重加载** | `_predict_with_pretrained()` 将已有的 `.pth` 权重加载到 fastai 模型中 |
 | **PyTorch ≥2.6 兼容** | Monkey-patch `Learner.load`，使用 `weights_only=False` |
@@ -63,7 +63,16 @@ cd code
 python run_lightning_inference.py
 ```
 
-支持测试全部架构（xresnet、inception、resnet、lstm），涵盖 `all`（71 类）和 `superdiagnostic`（5 类）两种任务。
+当前实现仅支持 XResNet Lightning checkpoint。Lightning checkpoint 需要使用 PyTorch 2.x；项目默认的 `ecg_env`（PyTorch 1.4）只能用于 fastai `.pth` 推理。
+
+**混合噪声 Lightning checkpoint 评估：**
+
+```bash
+cd code
+python evaluate_noisy_mixed_lightning.py
+```
+
+该脚本支持 `lenet`、`lstm`、`resnet`、`inception`、`xresnet` 的 `all` 和 `superdiagnostic` checkpoint，并严格校验每个 checkpoint 的全部参数键和张量形状。运行前需使用 PyTorch 2.4 或更高版本。
 
 ### 5. 已有结果快速评估
 
@@ -77,9 +86,50 @@ python test_evaluate_exp0.py
 | 脚本 | 用途 |
 |---|---|
 | `code/run_inference.py` | Fastai xresnet1d101 推理，兼容 PyTorch 2.6 |
-| `code/run_lightning_inference.py` | Lightning 检查点推理（4 种架构 × 2 种任务） |
+| `code/run_lightning_inference.py` | XResNet Lightning checkpoint 推理 |
 | `code/test_evaluate_exp0.py` | 不重新推理，直接评估已有预测结果 |
 | `code/reproduce_results.py` | 完整复现流程（已适配清洗数据集） |
+| `code/evaluate_noisy_mixed_fastai.py` | 混合噪声数据集的 fastai xresnet1d101 SNR 评估（v0.1.0） |
+| `code/evaluate_noisy_mixed_lightning.py` | 混合噪声数据集的全部 Lightning checkpoint SNR 评估（v0.1.0） |
+| `code/models/lightning_checkpoint_models.py` | Lightning checkpoint 严格加载模型定义（v0.1.0） |
+| `code/generate_noisy_superclass_reports.py` | 生成 5 类 superclass 预测明细、汇总与逐类统计（v0.1.0） |
+| `docs/emd_features.md` | EMD 特征文件、公共列、排序和标签对齐说明 |
+| `docs/cbam_emd_late_fusion.md` | CBAM-xResNet1D EMD late-fusion 训练说明 |
+| `docs/colab.md` | Colab 数据下载、校验与训练入口 |
+
+## 混合噪声 SNR 评估（v0.1.0）
+
+`evaluate_noisy_mixed_fastai.py` 使用 `data/ptbxl_noisy_mixed_shared/` 中的第 10 折记录，复用 `exp0` 的标签编码和训练集标准化器，对 `fastai_xresnet1d101.pth` 在每个 SNR 下评估。
+
+```bash
+cd code
+python evaluate_noisy_mixed_fastai.py
+```
+
+预测和指标写入 `output/noisy_mixed_shared/fastai_xresnet1d101/`；已有的 SNR 预测会自动复用。结果同时包含 71 类 SCP 指标，以及从 SCP 预测聚合得到的 5 类诊断 superclass 指标（macro-AUC、标签准确率、完全匹配准确率、macro-F1、macro recall、CD/HYP/MI/NORM/STTC 各类 recall）。v0.1.0 已完成的测试结果如下：
+
+| SNR | Macro-AUC | 标签准确率 | 完全匹配准确率 |
+|---:|---:|---:|---:|
+| 24 dB | 0.9287 | 0.9790 | 0.3695 |
+| 12 dB | 0.9269 | 0.9782 | 0.3563 |
+| 6 dB | 0.9191 | 0.9768 | 0.3323 |
+| 0 dB | 0.9010 | 0.9741 | 0.2497 |
+| -6 dB | 0.8474 | 0.9685 | 0.1659 |
+
+## Superclass 报告（v0.1.0）
+
+```bash
+cd code
+python generate_noisy_superclass_reports.py
+```
+
+该脚本以固定阈值 0.5 聚合 71 类 SCP 预测为 CD、HYP、MI、NORM、STTC 五类诊断 superclass，并使用 manifest 中的 `snr_realized_db` 分组。输出位于 `output/noisy_mixed_shared/fastai_xresnet1d101/`：
+
+| 文件 | 内容 |
+|---|---|
+| `sample_predictions.csv` | 每条 ECG 的真实标签、概率、二值预测及实际 SNR |
+| `overall_metrics.csv` | 每个实际 SNR 区间的整体指标与 1000 次 bootstrap 95% CI |
+| `per_class_metrics.csv` | 每个实际 SNR 区间、每个 superclass 的混淆矩阵和指标 |
 
 ## 参考文献
 

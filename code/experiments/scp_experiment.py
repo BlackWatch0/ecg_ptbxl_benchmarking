@@ -4,8 +4,10 @@ import pickle
 import pandas as pd
 import numpy as np
 import multiprocessing
+import json
 from itertools import repeat
 from pathlib import Path
+from utils import emd_features
 
 class SCP_Experiment():
     '''
@@ -47,6 +49,11 @@ class SCP_Experiment():
 
         # Select relevant data and convert to one-hot
         self.data, self.labels, self.Y, _ = utils.select_data(self.data, self.labels, self.task, self.min_samples, self.outputfolder+self.experiment_name+'/data/')
+        self.emd_data = None
+        self.emd_feature_columns = None
+        emd_config = self._get_emd_config()
+        if emd_config is not None:
+            self._prepare_emd_features(emd_config)
         self.input_shape = self.data[0].shape
         
         # 10th fold for testing (9th for now)
@@ -59,8 +66,23 @@ class SCP_Experiment():
         self.X_train = self.data[self.labels.strat_fold <= self.train_fold]
         self.y_train = self.Y[self.labels.strat_fold <= self.train_fold]
 
+        if self.emd_data is not None:
+            self.emd_train = self.emd_data[self.labels.strat_fold <= self.train_fold]
+            self.emd_val = self.emd_data[self.labels.strat_fold == self.val_fold]
+            self.emd_test = self.emd_data[self.labels.strat_fold == self.test_fold]
+            print('EMD train/val/test counts: {}/{}/{}'.format(
+                len(self.emd_train), len(self.emd_val), len(self.emd_test)
+            ))
+
         # Preprocess signal data
         self.X_train, self.X_val, self.X_test = utils.preprocess_signals(self.X_train, self.X_val, self.X_test, self.outputfolder+self.experiment_name+'/data/')
+        if self.emd_data is not None:
+            mean, std = emd_features.fit_emd_standardizer(self.emd_train)
+            self.emd_train = emd_features.apply_emd_standardizer(self.emd_train, mean, std)
+            self.emd_val = emd_features.apply_emd_standardizer(self.emd_val, mean, std)
+            self.emd_test = emd_features.apply_emd_standardizer(self.emd_test, mean, std)
+            data_path = Path(self.outputfolder+self.experiment_name+'/data/')
+            emd_features.save_emd_standardizer(data_path/'emd_scaler.npz', mean, std, self.emd_feature_columns)
         self.n_classes = self.y_train.shape[1]
 
         # save train and test labels
@@ -104,6 +126,13 @@ class SCP_Experiment():
             elif modeltype == "fastai_model":
                 from models.fastai_model import fastai_model
                 model = fastai_model(modelname, n_classes, self.sampling_frequency, mpath, self.input_shape, **modelparams)
+            elif modeltype == "cbam_xresnet1d_model":
+                from models.cbam_xresnet1d_model import cbam_xresnet1d_model
+                if self.emd_data is None and modelparams.get('input_mode', 'late_fusion') != 'ecg_only':
+                    raise ValueError('EMD features are required for {} mode'.format(modelparams.get('input_mode')))
+                modelparams = self._network_model_params(modelparams)
+                model = cbam_xresnet1d_model(modelname, n_classes, self.sampling_frequency, mpath,
+                                              self.input_shape, **modelparams)
             elif modeltype == "YOUR_MODEL_TYPE":
                 # YOUR MODEL GOES HERE!
                 from models.your_model import YourModel
@@ -114,6 +143,17 @@ class SCP_Experiment():
 
             if self.skip_training and modeltype == "fastai_model":
                 self._predict_with_pretrained(model, modelname, mpath)
+            elif modeltype == "cbam_xresnet1d_model":
+                if self.emd_data is None:
+                    X_train, X_val, X_test = self.X_train, self.X_val, self.X_test
+                else:
+                    X_train = self._paired_inputs(self.X_train, self.emd_train)
+                    X_val = self._paired_inputs(self.X_val, self.emd_val)
+                    X_test = self._paired_inputs(self.X_test, self.emd_test)
+                model.fit(X_train, self.y_train, X_val, self.y_val)
+                model.predict(X_train).dump(mpath+'y_train_pred.npy')
+                model.predict(X_val).dump(mpath+'y_val_pred.npy')
+                model.predict(X_test).dump(mpath+'y_test_pred.npy')
             else:
                 # fit model
                 model.fit(self.X_train, self.y_train, self.X_val, self.y_val)
@@ -142,6 +182,73 @@ class SCP_Experiment():
         np.array(ensemble_train).mean(axis=0).dump(ensemblepath + 'y_train_pred.npy')
         np.array(ensemble_test).mean(axis=0).dump(ensemblepath + 'y_test_pred.npy')
         np.array(ensemble_val).mean(axis=0).dump(ensemblepath + 'y_val_pred.npy')
+
+    def _get_emd_config(self):
+        configs = []
+        for model in self.models:
+            if model['modeltype'] == 'cbam_xresnet1d_model' and model['parameters'].get('input_mode', 'late_fusion') != 'ecg_only':
+                configs.append(model['parameters'])
+        if not configs:
+            return None
+        config = configs[0]
+        paths = config.get('emd_feature_paths')
+        scenario = config.get('emd_scenario')
+        if not paths or not scenario:
+            raise ValueError('EMD experiments require emd_feature_paths and emd_scenario')
+        if scenario not in paths:
+            raise ValueError('EMD scenario {} is not present in emd_feature_paths'.format(scenario))
+        for other in configs[1:]:
+            if other.get('emd_scenario') != scenario or other.get('emd_feature_paths') != paths:
+                raise ValueError('All EMD models in one experiment must use the same EMD source')
+        waveform_scenario = config.get('waveform_scenario', scenario)
+        if waveform_scenario != scenario:
+            raise ValueError('waveform_scenario and emd_scenario must match')
+        return config
+
+    def _prepare_emd_features(self, config):
+        paths = config['emd_feature_paths']
+        scenario = config['emd_scenario']
+        all_paths = config.get('emd_feature_paths_for_schema', list(paths.values()))
+        columns = emd_features.resolve_emd_feature_columns(all_paths, config.get('emd_feature_columns'))
+        record_ids, features, incomplete = emd_features.load_emd_features(
+            paths[scenario], self.labels, columns, self.labels.index.values,
+            config.get('missing_record_policy', 'drop'), config.get('feature_log_transform', False),
+            config.get('log_feature_columns')
+        )
+        positions = self.labels.index.get_indexer(record_ids)
+        if (positions < 0).any():
+            raise ValueError('EMD record IDs could not be aligned to selected metadata')
+        self.data = self.data[positions]
+        self.labels = self.labels.loc[record_ids]
+        self.Y = self.Y[positions]
+        self.emd_data = features
+        self.emd_feature_columns = columns
+        data_path = Path(self.outputfolder+self.experiment_name+'/data/')
+        data_path.mkdir(parents=True, exist_ok=True)
+        with open(data_path/'emd_config.json', 'w') as file:
+            json.dump({
+                'emd_scenario': scenario,
+                'waveform_scenario': config.get('waveform_scenario', scenario),
+                'emd_feature_file': str(paths[scenario]),
+                'feature_columns': columns,
+                'number_of_emd_features': len(columns),
+                'number_of_dropped_records': len(incomplete),
+                'dropped_record_ids': [int(record_id) for record_id in incomplete],
+            }, file, indent=2)
+        print('EMD scenario: {}, file: {}'.format(scenario, paths[scenario]))
+        print('EMD shape: {}, dropped records: {}'.format(features.shape, len(incomplete)))
+
+    def _network_model_params(self, params):
+        excluded = {
+            'emd_feature_paths', 'emd_feature_paths_for_schema', 'emd_scenario', 'waveform_scenario',
+            'emd_feature_columns', 'missing_record_policy', 'feature_log_transform', 'log_feature_columns'
+        }
+        return {key: value for key, value in params.items() if key not in excluded}
+
+    def _paired_inputs(self, X, emd):
+        if len(X) != len(emd):
+            raise AssertionError('ECG and EMD sample counts differ')
+        return list(zip(X, emd))
 
     def _predict_with_pretrained(self, model, modelname, mpath):
         import torch
