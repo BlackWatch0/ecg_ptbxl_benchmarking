@@ -77,3 +77,14 @@ python diagnose_cbam_emd.py --experiment exp_emd_late_fusion --model cbam_xresne
 ```
 
 诊断会保存 validation BCE、全阴性和 class-prior BCE 基线、标签稀疏度、0.5/0.3 阈值完整指标及逐类 ROC-AUC、PR-AUC、F1 到模型结果目录。训练过程会保存 `best_valid_loss.pth`、最终重载后的模型权重和 `training_history.csv`。
+
+## 已完成训练的恢复
+
+若 Colab 在训练结束后的 checkpoint 加载阶段因 PyTorch 2.6 `weights_only=True` 报错，训练得到的 `.pth` 仍可恢复，不需要重新训练。同步修复后执行：
+
+```bash
+python recover_cbam_emd_predictions.py
+python diagnose_cbam_emd.py --experiment exp_emd_late_fusion --model cbam_xresnet1d101_late_fusion
+```
+
+恢复脚本固定使用原训练时的 250 点、2.5 秒验证滑窗，仅生成 train/validation/test 预测与评估结果，不调用 `fit()`。后续新训练仍使用配置中的完整 1,000 点、10 秒输入。

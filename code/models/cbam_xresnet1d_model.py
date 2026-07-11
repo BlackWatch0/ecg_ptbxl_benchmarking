@@ -16,6 +16,27 @@ from models.cbam_xresnet1d import cbam_xresnet1d101
 from models.timeseries_utils import aggregate_predictions
 
 
+def _load_checkpoint(path, device):
+    try:
+        return torch.load(path, map_location=device, weights_only=False)
+    except TypeError:
+        return torch.load(path, map_location=device)
+
+
+def _patched_learner_load(self, name_or_path, with_opt=False, device='cpu'):
+    source = self.path / self.model_dir / '{}.pth'.format(name_or_path)
+    state = _load_checkpoint(source, device)
+    if set(state.keys()) == {'model', 'opt'}:
+        self.model.load_state_dict(state['model'])
+        if with_opt:
+            self.opt.load_state_dict(state['opt'])
+    else:
+        self.model.load_state_dict(state)
+
+
+Learner.load = _patched_learner_load
+
+
 class PairedTimeseriesDatasetCrops(Dataset):
     def __init__(self, samples, labels, output_size, chunk_length, min_chunk_length,
                  stride=None, random_crop=True):
