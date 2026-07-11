@@ -18,7 +18,7 @@
 | mixed-noise PTB-XL | `data/ptbxl_noisy_mixed_shared/` |
 | EMD features | `data/emd_features/` |
 
-脚本通过标志文件定位压缩包内部目录，不依赖压缩包顶层目录名称：
+脚本支持 zip、tar、7z、RAR 和直接 CSV，并通过标志文件定位压缩包内部目录，不依赖压缩包顶层目录名称：
 
 - clean：`ptbxl_database_clean_no_noise.csv`
 - noisy：`ptbxl_noisy_mixed_shared_manifest.csv`

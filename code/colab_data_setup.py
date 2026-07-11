@@ -1,5 +1,6 @@
 import argparse
 import shutil
+import subprocess
 import tarfile
 import zipfile
 from pathlib import Path
@@ -36,6 +37,18 @@ def extract(archive, destination, asset):
         if is_7z:
             with py7zr.SevenZipFile(archive, mode='r') as file:
                 file.extractall(destination)
+            return
+        try:
+            import rarfile
+            is_rar = rarfile.is_rarfile(archive)
+        except ImportError:
+            is_rar = False
+        if is_rar:
+            try:
+                with rarfile.RarFile(archive) as file:
+                    file.extractall(destination)
+            except rarfile.RarCannotExec:
+                subprocess.check_call(['7z', 'x', '-y', '-o{}'.format(destination), str(archive)])
         elif asset == 'emd':
             try:
                 header = Path(archive).open('r', encoding='utf-8').readline()
