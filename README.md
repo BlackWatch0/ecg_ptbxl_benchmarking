@@ -169,15 +169,40 @@ python recover_cbam_emd_predictions.py
 | `xresnet1d101_emd_late_fusion` | 否 | 是 | ECG + EMD concat |
 | `cbam_xresnet1d101_emd_late_fusion` | 是 | 是 | ECG + EMD concat |
 
-在 Colab 中先挂载 Google Drive，再从仓库根目录执行：
+在 Colab 新建一个代码单元，完整执行以下代码。它会保留已有的 `data/` 目录；即使之前清理工作区时删除了 `.git` 或脚本，也会自动重建仓库并放回数据集。
 
 ```python
 from google.colab import drive
-drive.mount('/content/drive')
-```
+from pathlib import Path
+import shutil
+import subprocess
 
-```bash
-!bash run_ablation_colab.sh
+drive.mount('/content/drive')
+
+repo = Path('/content/ecg_ptbxl_benchmarking')
+saved_data = Path('/content/ecg_ptbxl_preserved_data')
+
+if repo.exists() and not (repo / '.git').exists():
+    if saved_data.exists():
+        raise RuntimeError('Temporary data path already exists: {}'.format(saved_data))
+    if (repo / 'data').exists():
+        shutil.move(str(repo / 'data'), str(saved_data))
+    shutil.rmtree(repo)
+
+if not repo.exists():
+    subprocess.run([
+        'git', 'clone', 'https://github.com/BlackWatch0/ecg_ptbxl_benchmarking.git', str(repo)
+    ], check=True)
+
+if saved_data.exists():
+    if (repo / 'data').exists():
+        raise RuntimeError('Refusing to overwrite cloned data path')
+    shutil.move(str(saved_data), str(repo / 'data'))
+
+subprocess.run(['git', '-C', str(repo), 'fetch', 'origin'], check=True)
+subprocess.run(['git', '-C', str(repo), 'checkout', 'master'], check=True)
+subprocess.run(['git', '-C', str(repo), 'reset', '--hard', 'origin/master'], check=True)
+subprocess.run(['bash', 'run_ablation_colab.sh'], cwd=str(repo), check=True)
 ```
 
 脚本会检查数据；缺失时调用既有下载准备流程。它以 `--resume` 运行，因此已存在的 best checkpoint、训练 history、全部 SNR 指标和预测文件会被复用。结果默认保存到：
