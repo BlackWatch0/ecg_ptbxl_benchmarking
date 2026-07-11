@@ -671,7 +671,10 @@ def final_report(output_root):
         noisy_means['mean_auc_drop'] = robust_frame.groupby('experiment_name').auc_drop.mean()
         noisy_means['mean_f1_drop'] = robust_frame.groupby('experiment_name').f1_drop.mean()
     noisy_means.reset_index().to_csv(report / 'mean_noisy_metrics.csv', index=False)
-    aggregate = selected.groupby(['experiment_name', 'ecg_scenario', 'threshold_strategy']).agg(['mean', 'std']).reset_index(); aggregate.to_csv(report / 'ablation_seed_mean_std.csv', index=False)
+    aggregate_columns = selected.select_dtypes(include=[np.number]).columns.tolist()
+    aggregate = selected.groupby(['experiment_name', 'ecg_scenario', 'threshold_strategy'])[aggregate_columns].agg(
+        ['mean', 'std']).reset_index()
+    aggregate.to_csv(report / 'ablation_seed_mean_std.csv', index=False)
     best = {'best_clean_model': clean.loc[clean.macro_roc_auc.idxmax(), 'experiment_name'],
             'best_mean_noisy_model': noisy_means.mean_noisy_macro_auc.idxmax(),
             'best_minus6db_model': selected[selected.ecg_scenario == 'snrm6'].sort_values('macro_roc_auc', ascending=False).iloc[0].experiment_name,
