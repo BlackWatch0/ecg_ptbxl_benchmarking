@@ -12,6 +12,7 @@
 |---|---|
 | **推理管线** | `run_inference.py` — 以纯推理模式运行 fastai 模型（`skip_training=True`） |
 | **Lightning 支持** | `run_lightning_inference.py` 提供 XResNet 推理；`evaluate_noisy_mixed_lightning.py` 严格加载全部现有架构 |
+| **CBAM + EMD** | `run_cbam_emd_experiment.py` 训练 5 类诊断 superclass 的 CBAM-xResNet1D + EMD late fusion 模型 |
 | **自定义数据集** | `load_dataset()` 新增 `database_filename` 和 `dataset_type` 参数，支持使用清洗后的 CSV |
 | **预训练权重加载** | `_predict_with_pretrained()` 将已有的 `.pth` 权重加载到 fastai 模型中 |
 | **PyTorch ≥2.6 兼容** | Monkey-patch `Learner.load`，使用 `weights_only=False` |
@@ -94,6 +95,12 @@ python test_evaluate_exp0.py
 | `code/models/lightning_checkpoint_models.py` | Lightning checkpoint 严格加载模型定义（v0.1.0） |
 | `code/generate_noisy_superclass_reports.py` | 生成 5 类 superclass 预测明细、汇总与逐类统计（v0.1.0） |
 | `code/evaluate_cbam_emd_snr.py` | 使用匹配 waveform/EMD 的 CBAM 各 SNR 测试 |
+| `code/run_cbam_emd_experiment.py` | CBAM-xResNet1D + EMD late fusion 5 类训练入口 |
+| `code/recover_cbam_emd_predictions.py` | 训练中断后恢复预测（不重训） |
+| `code/diagnose_cbam_emd.py` | CBAM 验证集诊断（BCE、AUC、F1、每类指标） |
+| `code/evaluate_cbam_emd_snr.py` | CBAM 各 SNR 测试（24/12/6/0/-6 dB） |
+| `code/colab_data_setup.py` | Colab 数据下载、解压与目录归位 |
+| `code/utils/emd_features.py` | EMD 特征加载、排序、对齐与标准化 |
 | `docs/emd_features.md` | EMD 特征文件、公共列、排序和标签对齐说明 |
 | `docs/cbam_emd_late_fusion.md` | CBAM-xResNet1D EMD late-fusion 训练说明 |
 | `docs/colab.md` | Colab 数据下载、校验与训练入口 |
@@ -131,6 +138,25 @@ python generate_noisy_superclass_reports.py
 | `sample_predictions.csv` | 每条 ECG 的真实标签、概率、二值预测及实际 SNR |
 | `overall_metrics.csv` | 每个实际 SNR 区间的整体指标与 1000 次 bootstrap 95% CI |
 | `per_class_metrics.csv` | 每个实际 SNR 区间、每个 superclass 的混淆矩阵和指标 |
+
+## CBAM-xResNet1D + EMD Late Fusion（5 类诊断）
+
+训练 10 秒、1000 点 CBAM-xResNet1D 主干 + EMD 特征 MLP encoder 的 late fusion 模型，输出 5 个诊断 superclass（NORM、MI、STTC、CD、HYP）。
+
+```bash
+cd code
+python run_cbam_emd_experiment.py          # 训练 + 预测
+python diagnose_cbam_emd.py               # 验证集诊断
+python evaluate_cbam_emd_snr.py           # 各 SNR 测试
+```
+
+训练中断时使用恢复脚本：
+
+```bash
+python recover_cbam_emd_predictions.py
+```
+
+详细说明见 `docs/cbam_emd_late_fusion.md` 和 `docs/colab.md`。
 
 ## 参考文献
 

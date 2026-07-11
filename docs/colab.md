@@ -1,56 +1,67 @@
 # Colab 运行指南
 
-## 一键运行
+## 全新运行（推荐）
 
-在新的 Colab notebook 中依次运行以下单元。GPU runtime 可加快 CBAM-xResNet1D 训练。
+在一个新的 Colab notebook 单元格中执行：
 
 ```bash
 !git clone https://github.com/BlackWatch0/ecg_ptbxl_benchmarking.git
 %cd ecg_ptbxl_benchmarking
+!git checkout feat/noisy-snr-evaluation
 !bash colab_run.sh --train
 ```
 
-`colab_run.sh` 使用以下 Google Drive 文件：
+这会：
 
-| 资源 | 目标目录 |
-|---|---|
-| clean PTB-XL | `data/ptbxl_clean_no_noise/` |
-| mixed-noise PTB-XL | `data/ptbxl_noisy_mixed_shared/` |
-| EMD features | `data/emd_features/` |
+1. 下载 clean PTB-XL、noisy PTB-XL、EMD features 三个数据包。
+2. 将数据归位到 `data/`。
+3. 执行 `run_cbam_emd_experiment.py`，训练 5 类 CBAM-xResNet1D + EMD late fusion 模型。
+4. 生成验证集预测和评估结果。
 
-脚本支持 zip、tar、7z、RAR 和直接 CSV，并通过标志文件定位压缩包内部目录，不依赖压缩包顶层目录名称：
+建议使用 GPU runtime（Runtime → Change runtime type → T4 GPU）。
 
-- clean：`ptbxl_database_clean_no_noise.csv`
-- noisy：`ptbxl_noisy_mixed_shared_manifest.csv`
-- EMD：`original/PTBXL_Batch_Original_EMD_reduced_features.csv`
-
-默认完整流程会下载、解压、校验后运行 `code/run_cbam_emd_experiment.py`。该实验使用 clean waveform 与 original EMD features，并把结果写入 `output/exp_emd_late_fusion/`。
-
-## 分步运行
-
-仅下载、解压和归位数据：
+## 仅准备数据
 
 ```bash
 !bash colab_run.sh --prepare
 ```
 
-仅验证目录与标志文件：
+仅校验数据：
 
 ```bash
 !bash colab_run.sh --validate
 ```
 
-数据准备完成后手动训练：
+## 训练后操作
+
+训练完成后，在同目录依次执行：
 
 ```bash
 %cd /content/ecg_ptbxl_benchmarking/code
-!python run_cbam_emd_experiment.py
+
+# 验证集诊断
+!python diagnose_cbam_emd.py
+
+# 各 SNR 测试
+!python evaluate_cbam_emd_snr.py
 ```
 
-## 场景一致性
+## 训练中断恢复
 
-当前默认配置是 `original`。若训练某个噪声场景，必须在 `code/configs/cbam_configs.py` 中同时把 `emd_scenario` 和 `waveform_scenario` 设置为同一个值，并确保 `datafolder` 指向该场景对应的 waveform/metadata。代码会拒绝两个场景名称不一致的配置。
+若训练在结束后 crash（checkpoint 已保存），不需要重训：
 
-## 依赖说明
+```bash
+%cd /content/ecg_ptbxl_benchmarking/code
+!python recover_cbam_emd_predictions.py
+!python diagnose_cbam_emd.py
+!python evaluate_cbam_emd_snr.py
+```
 
-脚本安装 `gdown`、`wfdb` 与 `fastai==1.0.61`。项目原训练流程基于 Fastai v1；若 Colab 的预装 PyTorch 与 Fastai v1 不兼容，应使用项目 `ecg_env.yml` 对应的兼容环境，或先在 Colab 固定可兼容的 PyTorch/Fastai 组合。数据下载、解压、目录校验与 EMD loader 不依赖 Fastai。
+## 更新已有仓库
+
+```bash
+%cd /content/ecg_ptbxl_benchmarking
+!git fetch origin feat/noisy-snr-evaluation
+!git checkout feat/noisy-snr-evaluation
+!git reset --hard origin/feat/noisy-snr-evaluation
+```

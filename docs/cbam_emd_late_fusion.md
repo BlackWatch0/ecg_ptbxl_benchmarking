@@ -1,13 +1,111 @@
-# CBAM-xResNet1D EMD Late Fusion
+# CBAM-xResNet1D + EMD Late Fusion（5 类诊断 Superclass）
 
-## 配置
+## 任务与输出
 
-配置位于 `code/configs/cbam_configs.py`，使用现有 Python dict 配置风格，不引入 YAML。默认 late-fusion 配置为 `conf_cbam_xresnet1d101_late_fusion`：
+```text
+task = superdiagnostic
+num_classes = 5
+label_order = [NORM, MI, STTC, CD, HYP]
+loss = binary_cross_entropy_with_logits（多标签，不是 CrossEntropy）
+```
+
+训练输入：
+
+```text
+ECG:  [B, 12, 1000]  (10 秒, 100 Hz)
+EMD:  [B, 12, 11]    (11 个公共特征)
+Label: [B, 5]         (multi-hot)
+```
+
+## 一键运行
+
+```bash
+%cd /content/ecg_ptbxl_benchmarking
+!git pull origin feat/noisy-snr-evaluation
+!bash colab_run.sh --train
+```
+
+完整流程：数据下载 → 校验 → `run_cbam_emd_experiment.py`（训练 + 预测 + 评估）。
+
+## 分步运行
+
+```bash
+# 只下载数据
+!bash colab_run.sh --prepare
+
+# 校验数据
+!bash colab_run.sh --validate
+
+# 训练（需要先准备好数据）
+%cd /content/ecg_ptbxl_benchmarking/code
+!python run_cbam_emd_experiment.py
+```
+
+## 训练后诊断
+
+```bash
+%cd /content/ecg_ptbxl_benchmarking/code
+!python diagnose_cbam_emd.py
+```
+
+输出保存至：
+
+```text
+output/exp_emd_late_fusion_superdiagnostic/models/cbam_xresnet1d101_late_fusion_superdiagnostic/
+  validation_diagnosis.json
+  validation_per_class_threshold_0.5.csv
+  validation_per_class_threshold_0.3.csv
+```
+
+## 各 SNR 测试
+
+训练完成后：
+
+```bash
+%cd /content/ecg_ptbxl_benchmarking/code
+!python evaluate_cbam_emd_snr.py
+```
+
+对 24、12、6、0、-6 dB 分别使用匹配的 noisy waveform 和同 SNR EMD CSV，输出：
+
+```text
+output/exp_emd_late_fusion_superdiagnostic/models/cbam_xresnet1d101_late_fusion_superdiagnostic/
+  snr_24/   y_test_prob.npy  y_test_logits.npy
+  snr_12/   ...
+  snr_0/    ...
+  snr_-6/   ...
+  snr_test_results.csv
+```
+
+## 训练中断恢复
+
+若训练完成后报错（如 PyTorch 2.6 `weights_only` 或 `purge` 参数），`best_valid_loss.pth` 已保存，不需要重新训练：
+
+```bash
+%cd /content/ecg_ptbxl_benchmarking/code
+!python recover_cbam_emd_predictions.py
+!python diagnose_cbam_emd.py
+!python evaluate_cbam_emd_snr.py
+```
+
+## 消融实验
+
+三种输入模式各有对应配置：
+
+| 配置 | 模式 |
+|---|---|
+| `conf_cbam_xresnet1d101_late_fusion_superdiagnostic` | ECG + EMD late fusion |
+| `conf_cbam_xresnet1d101_ecg_only_superdiagnostic` | ECG only |
+| `conf_cbam_xresnet1d101_feature_only_superdiagnostic` | EMD feature only |
+
+修改 `run_cbam_emd_experiment.py` 的导入和 `SCP_Experiment` 配置即可切换。
+
+## 配置参数
 
 ```python
-input_mode='late_fusion'
+input_mode='late_fusion'  # ecg_only | feature_only | late_fusion
 use_cbam=True
-fusion_type='concat'
+fusion_type='concat'      # concat | gated
 cbam_reduction=16
 cbam_kernel_size=7
 feature_hidden_dim=256
@@ -15,90 +113,48 @@ feature_embedding_dim=128
 feature_dropout=0.3
 fusion_hidden_dim=256
 fusion_dropout=0.4
-missing_record_policy='drop'
-feature_log_transform=False
+input_size=10.0           # 秒
+epochs=50
+lr=1e-2
+bs=128
 ```
 
-`emd_feature_paths` 是场景到 CSV 的映射。`emd_scenario` 与 `waveform_scenario` 必须相同，避免将不同噪声场景的波形与 EMD 特征混合。默认配置使用 clean waveform 和 `original` EMD 特征。
-
-支持的 `input_mode`：
-
-| 模式 | 输入 | 分类路径 |
-|---|---|---|
-| `ecg_only` | `[B, 12, T]` | CBAM-xResNet1D ECG embedding 到分类器 |
-| `feature_only` | `[B, 12, F]` | EMD MLP encoder 到分类器 |
-| `late_fusion` | 两者 | ECG embedding 与 EMD embedding 拼接或 gated 后经 fusion MLP |
-
-模型输出为 raw logits；训练损失保持 `binary_cross_entropy_with_logits`，sigmoid 仅在预测阶段应用。
-
-## 数据对齐
-
-EMD loader 位于 `code/utils/emd_features.py`。它：
-
-1. 用 `RecordNumber == metadata.ecg_id` 对齐，而不使用 CSV 行号或 `RecordFile`。
-2. 显式按 `RecordNumber, LeadIndex` 排序。
-3. 要求每条记录完整包含 12 个固定顺序导联。
-4. 对 `drop` 策略同步删除不完整的 ECG、EMD、标签和 fold；`error` 策略会停止并报告记录 ID。
-5. 使用训练折 1-8 的 `[lead, feature]` 均值和标准差标准化 EMD；验证折 9 和测试折 10 不参与拟合。
-
-跨配置中全部 feature CSV 的交集决定最终列，且保持 `CANDIDATE_EMD_FEATURES` 的顺序。当前实际检测到 11 列：
+## 结果文件
 
 ```text
-RetainedEnergy, ERV, ERS, IF_Median, IF_Variance, IF_Slope,
-IB2_Variance, IB2_Slope, IE12_Mean, IE12_Median, IE12_Slope
+output/exp_emd_late_fusion_superdiagnostic/
+  data/
+    mlb.pkl
+    standard_scaler.pkl
+    emd_scaler.npz
+    emd_config.json
+    y_train.npy / y_val.npy / y_test.npy
+  models/cbam_xresnet1d101_late_fusion_superdiagnostic/
+    models/
+      cbam_xresnet1d101_late_fusion_superdiagnostic.pth
+      best_valid_loss.pth
+    results/te_results.csv
+    y_train_pred.npy / y_val_pred.npy / y_test_pred.npy
+    y_val_logits.npy
+    training_history.csv
+    validation_diagnosis.json
+    snr_*/  y_test_prob.npy  y_test_logits.npy
+    snr_test_results.csv
 ```
 
-因此默认 EMD tensor shape 是 `[N, 12, 11]`，不是文档早期误称的 12 个特征。
+## 实际标签
 
-## 运行
+```text
+总记录: 16,476
+train:   13,213
+val:     1,618
+test:    1,645
+多标签记录: 3,955
 
-在 `code/` 下执行：
-
-```bash
-python run_cbam_emd_experiment.py
+类别阳性数 (train/val/test):
+  NORM: 5999 / 733 / 738
+  MI:   3257 / 395 / 408
+  STTC: 3195 / 392 / 410
+  CD:   3021 / 373 / 375
+  HYP:  1701 / 210 / 207
 ```
-
-这会训练 `exp_emd_late_fusion` 的 `all` 任务。已有 baseline 的完整训练命令保持不变：
-
-```bash
-python reproduce_results.py
-```
-
-结果目录会保存 `emd_scaler.npz`、`emd_config.json`、标签、预测和 fastai checkpoint。`emd_config.json` 保存所用文件、特征列和被删除记录；`emd_scaler.npz` 保存训练集 scaler 和固定导联顺序。
-
-## 训练诊断
-
-CBAM 配置使用 `input_size=10.0`，因此模型输入是 100 Hz 下完整的 1,000 点、10 秒 ECG。原项目 fastai baseline 的默认 `input_size=2.5` 保持不变，训练时输入 250 点裁剪。
-
-训练后执行：
-
-```bash
-python diagnose_cbam_emd.py --experiment exp_emd_late_fusion --model cbam_xresnet1d101_late_fusion
-```
-
-诊断会保存 validation BCE、全阴性和 class-prior BCE 基线、标签稀疏度、0.5/0.3 阈值完整指标及逐类 ROC-AUC、PR-AUC、F1 到模型结果目录。训练过程会保存 `best_valid_loss.pth`、最终重载后的模型权重和 `training_history.csv`。
-
-## 已完成训练的恢复
-
-若 Colab 在训练结束后的 checkpoint 加载阶段因 PyTorch 2.6 `weights_only=True` 报错，训练得到的 `.pth` 仍可恢复，不需要重新训练。同步修复后执行：
-
-```bash
-python recover_cbam_emd_predictions.py
-python diagnose_cbam_emd.py --experiment exp_emd_late_fusion --model cbam_xresnet1d101_late_fusion
-```
-
-恢复脚本默认使用当前配置的完整 1,000 点、10 秒输入，仅生成 train/validation/test 预测与评估结果，不调用 `fit()`。恢复旧 250 点 checkpoint 时显式指定：`CBAM_INPUT_SIZE=2.5 python recover_cbam_emd_predictions.py`。
-
-如果训练日志已显示 `Better model found`，但在训练结束阶段报 `purge` 参数错误，`best_valid_loss.pth` 已保存。恢复脚本会自动优先使用该文件，无需重新训练。
-
-## 多 SNR 测试
-
-新训练的 1,000 点 CBAM checkpoint 完成后执行：
-
-```bash
-python evaluate_cbam_emd_snr.py
-```
-
-脚本只读取 checkpoint，不训练。它对 fold 10 的 1,670 条记录分别测试 24、12、6、0、-6 dB：每档 waveform 从 noisy manifest 的 `wfdb_record_relative` 读取，EMD 从同 SNR 的 CSV 读取。ECG 使用训练集 `standard_scaler.pkl`，EMD 使用训练集 `emd_scaler.npz`；不会对任一 SNR 测试集重新拟合 scaler。输出为每个 SNR 的概率/logits 和 `snr_test_results.csv`。
-
-旧的 250 点 checkpoint 不应使用该脚本；它应继续使用 `recover_cbam_emd_predictions.py` 完成 clean validation/test 恢复。
