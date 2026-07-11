@@ -3,8 +3,31 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 
-from fastai.layers import *
-from fastai.core import *
+try:
+    from fastai.layers import *
+    from fastai.core import *
+except ImportError:
+    from typing import Collection, Optional, Union
+
+    Floats = Union[float, Collection[float]]
+
+    class Flatten(nn.Module):
+        def forward(self, x):
+            return x.view(x.size(0), -1)
+
+    def listify(value):
+        return value if isinstance(value, list) else [value]
+
+    def bn_drop_lin(n_in, n_out, bn=True, p=0., actn=None):
+        layers = []
+        if bn:
+            layers.append(nn.BatchNorm1d(n_in))
+        if p:
+            layers.append(nn.Dropout(p))
+        layers.append(nn.Linear(n_in, n_out))
+        if actn is not None:
+            layers.append(actn)
+        return layers
 
 ##############################################################################################################################################
 # utility functions
