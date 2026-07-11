@@ -93,6 +93,7 @@ python test_evaluate_exp0.py
 | `code/evaluate_noisy_mixed_lightning.py` | 混合噪声数据集的全部 Lightning checkpoint SNR 评估（v0.1.0） |
 | `code/models/lightning_checkpoint_models.py` | Lightning checkpoint 严格加载模型定义（v0.1.0） |
 | `code/generate_noisy_superclass_reports.py` | 生成 5 类 superclass 预测明细、汇总与逐类统计（v0.1.0） |
+| `code/evaluate_cbam_emd_snr.py` | 使用匹配 waveform/EMD 的 CBAM 各 SNR 测试 |
 | `docs/emd_features.md` | EMD 特征文件、公共列、排序和标签对齐说明 |
 | `docs/cbam_emd_late_fusion.md` | CBAM-xResNet1D EMD late-fusion 训练说明 |
 | `docs/colab.md` | Colab 数据下载、校验与训练入口 |

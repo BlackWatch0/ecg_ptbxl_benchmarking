@@ -88,3 +88,15 @@ python diagnose_cbam_emd.py --experiment exp_emd_late_fusion --model cbam_xresne
 ```
 
 恢复脚本固定使用原训练时的 250 点、2.5 秒验证滑窗，仅生成 train/validation/test 预测与评估结果，不调用 `fit()`。后续新训练仍使用配置中的完整 1,000 点、10 秒输入。
+
+## 多 SNR 测试
+
+新训练的 1,000 点 CBAM checkpoint 完成后执行：
+
+```bash
+python evaluate_cbam_emd_snr.py
+```
+
+脚本只读取 checkpoint，不训练。它对 fold 10 的 1,670 条记录分别测试 24、12、6、0、-6 dB：每档 waveform 从 noisy manifest 的 `wfdb_record_relative` 读取，EMD 从同 SNR 的 CSV 读取。ECG 使用训练集 `standard_scaler.pkl`，EMD 使用训练集 `emd_scaler.npz`；不会对任一 SNR 测试集重新拟合 scaler。输出为每个 SNR 的概率/logits 和 `snr_test_results.csv`。
+
+旧的 250 点 checkpoint 不应使用该脚本；它应继续使用 `recover_cbam_emd_predictions.py` 完成 clean validation/test 恢复。
