@@ -449,8 +449,8 @@ def smoke_test(bundle, config, device):
     for name, spec in EXPERIMENTS.items():
         model = build_model('xresnet1d101', 5, **spec, emd_features=len(bundle['emd_columns'])).to(device)
         model.train()
-        ecg = torch.from_numpy(split['ecg'][:1].transpose(0, 2, 1)).to(device)
-        emd = torch.from_numpy(split['emd'][:1]).to(device)
+        ecg = torch.from_numpy(split['ecg'][:1].transpose(0, 2, 1).astype(np.float32)).to(device)
+        emd = torch.from_numpy(split['emd'][:1].astype(np.float32)).to(device)
         logits = model(ecg, emd if spec['use_emd'] else None)
         if logits.shape != (1, 5) or not torch.isfinite(logits).all():
             raise ValueError('{} smoke forward failed with {}'.format(name, tuple(logits.shape)))
