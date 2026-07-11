@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DRIVE_OUTPUT="${ABLATION_OUTPUT_DIR:-/content/drive/MyDrive/ECG/ablation_results}"
+RUN_LOG="${DRIVE_OUTPUT}/ablation_run.log"
 
 if [[ ! -d /content/drive/MyDrive ]]; then
   echo "Google Drive is not mounted. Mount it first with: from google.colab import drive; drive.mount('/content/drive')"
@@ -16,10 +17,24 @@ if ! python "${ROOT}/code/colab_data_setup.py" validate --data-root "${ROOT}/dat
   bash "${ROOT}/colab_run.sh" --prepare
 fi
 mkdir -p "${DRIVE_OUTPUT}"
-python "${ROOT}/code/run_ablation_study.py" \
-  --config "${ROOT}/configs/ablation_cbam_emd.yaml" \
-  --output-dir "${DRIVE_OUTPUT}" \
+RUN_ARGS=(
+  --config "${ROOT}/configs/ablation_cbam_emd.yaml"
+  --output-dir "${DRIVE_OUTPUT}"
   --resume
+)
+if [[ "${ABLATION_SMOKE_ONLY:-0}" == "1" ]]; then
+  RUN_ARGS+=(--smoke-test)
+fi
+
+if ! python -u "${ROOT}/code/run_ablation_study.py" \
+  "${RUN_ARGS[@]}" 2>&1 | tee "${RUN_LOG}"; then
+  echo "Ablation runner failed. Full traceback: ${RUN_LOG}"
+  exit 1
+fi
+
+if [[ "${ABLATION_SMOKE_ONLY:-0}" == "1" ]]; then
+  exit 0
+fi
 
 ARCHIVE="${DRIVE_OUTPUT}/ablation_summary_figures_metrics.zip"
 python - "${DRIVE_OUTPUT}" "${ARCHIVE}" <<'PY'
