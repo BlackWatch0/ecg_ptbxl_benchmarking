@@ -1,4 +1,6 @@
 from copy import deepcopy
+from pathlib import Path
+import os
 
 from experiments.scp_experiment import SCP_Experiment
 from configs.cbam_configs import conf_cbam_xresnet1d101_late_fusion
@@ -10,9 +12,9 @@ outputfolder = '../output/'
 experiment_name = 'exp_emd_late_fusion'
 
 config = deepcopy(conf_cbam_xresnet1d101_late_fusion)
-config['parameters']['input_size'] = 2.5
+config['parameters']['input_size'] = float(os.environ.get('CBAM_INPUT_SIZE', config['parameters']['input_size']))
 config['parameters']['chunkify_train'] = False
-config['parameters']['chunkify_valid'] = True
+config['parameters']['chunkify_valid'] = config['parameters']['input_size'] != 10.0
 
 experiment = SCP_Experiment(
     experiment_name, 'all', datafolder, outputfolder, [config],
@@ -25,6 +27,8 @@ mpath = outputfolder + experiment_name + '/models/' + modelname + '/'
 params = experiment._network_model_params(config['parameters'])
 model = cbam_xresnet1d_model(modelname, experiment.n_classes, experiment.sampling_frequency,
                               mpath, experiment.input_shape, **params)
+if not (Path(mpath) / 'models' / '{}.pth'.format(modelname)).exists():
+    model.name = 'best_valid_loss'
 
 X_train = experiment._paired_inputs(experiment.X_train, experiment.emd_train)
 X_val = experiment._paired_inputs(experiment.X_val, experiment.emd_val)

@@ -67,6 +67,10 @@ def main():
     model_root = OUTPUT_ROOT / EXPERIMENT_NAME / 'models' / MODEL_NAME
     data_root = OUTPUT_ROOT / EXPERIMENT_NAME / 'data'
     checkpoint = model_root / 'models' / '{}.pth'.format(MODEL_NAME)
+    checkpoint_name = MODEL_NAME
+    if not checkpoint.exists():
+        checkpoint = model_root / 'models' / 'best_valid_loss.pth'
+        checkpoint_name = 'best_valid_loss'
     if not checkpoint.exists():
         raise FileNotFoundError('Missing trained CBAM checkpoint: {}'.format(checkpoint))
     if config['parameters']['input_size'] != 10.0:
@@ -86,6 +90,7 @@ def main():
     }}
     model = cbam_xresnet1d_model(MODEL_NAME, y_test.shape[1], 100, model_root,
                                  (1000, 12), **model_params)
+    model.name = checkpoint_name
     results = []
     for scenario, snr in SNR_SCENARIOS:
         print('Evaluating {} dB...'.format(snr))

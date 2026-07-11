@@ -87,7 +87,9 @@ python recover_cbam_emd_predictions.py
 python diagnose_cbam_emd.py --experiment exp_emd_late_fusion --model cbam_xresnet1d101_late_fusion
 ```
 
-恢复脚本固定使用原训练时的 250 点、2.5 秒验证滑窗，仅生成 train/validation/test 预测与评估结果，不调用 `fit()`。后续新训练仍使用配置中的完整 1,000 点、10 秒输入。
+恢复脚本默认使用当前配置的完整 1,000 点、10 秒输入，仅生成 train/validation/test 预测与评估结果，不调用 `fit()`。恢复旧 250 点 checkpoint 时显式指定：`CBAM_INPUT_SIZE=2.5 python recover_cbam_emd_predictions.py`。
+
+如果训练日志已显示 `Better model found`，但在训练结束阶段报 `purge` 参数错误，`best_valid_loss.pth` 已保存。恢复脚本会自动优先使用该文件，无需重新训练。
 
 ## 多 SNR 测试
 

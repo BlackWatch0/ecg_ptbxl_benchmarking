@@ -24,7 +24,7 @@ def _load_checkpoint(path, device):
         return torch.load(path, map_location=device)
 
 
-def _patched_learner_load(self, name_or_path, with_opt=False, device='cpu'):
+def _patched_learner_load(self, name_or_path, with_opt=False, device='cpu', purge=True):
     source = self.path / self.model_dir / '{}.pth'.format(name_or_path)
     state = _load_checkpoint(source, device)
     if set(state.keys()) == {'model', 'opt'}:
