@@ -169,3 +169,23 @@ class CBAMXResNet1DLateFusion(nn.Module):
 
 def cbam_xresnet1d101(**kwargs):
     return CBAMXResNet1DLateFusion(expansion=4, layers=(3, 4, 23, 3), **kwargs)
+
+
+def build_model(backbone_name, num_classes, use_cbam=False, use_emd=False,
+                fusion_type=None, emd_features=11, feature_hidden_dim=256,
+                feature_embedding_dim=128, fusion_hidden_dim=256, **kwargs):
+    if backbone_name != 'xresnet1d101':
+        raise ValueError('Unsupported backbone: {}'.format(backbone_name))
+    if use_emd:
+        input_mode = 'late_fusion'
+        fusion_type = fusion_type or 'concat'
+    else:
+        input_mode = 'ecg_only'
+        fusion_type = 'concat'
+    return cbam_xresnet1d101(
+        num_classes=num_classes, input_mode=input_mode, use_cbam=use_cbam,
+        fusion_type=fusion_type, emd_features=emd_features,
+        feature_hidden_dim=feature_hidden_dim,
+        feature_embedding_dim=feature_embedding_dim,
+        fusion_hidden_dim=fusion_hidden_dim, **kwargs
+    )

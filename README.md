@@ -158,6 +158,38 @@ python recover_cbam_emd_predictions.py
 
 详细说明见 `docs/cbam_emd_late_fusion.md` 和 `docs/colab.md`。
 
+## 一键消融实验（CBAM + EMD）
+
+`run_ablation_colab.sh` 会依次训练并评估四个固定的五类 `superdiagnostic` 多标签实验。四组实验使用相同的 fold 划分、随机种子、batch size、Adam + OneCycle 学习率策略、`BCEWithLogitsLoss` 和 early stopping 配置。
+
+| 实验名 | CBAM | EMD | 输入 |
+|---|---:|---:|---|
+| `xresnet1d101_baseline` | 否 | 否 | ECG |
+| `cbam_xresnet1d101` | 是 | 否 | ECG |
+| `xresnet1d101_emd_late_fusion` | 否 | 是 | ECG + EMD concat |
+| `cbam_xresnet1d101_emd_late_fusion` | 是 | 是 | ECG + EMD concat |
+
+在 Colab 中先挂载 Google Drive，再从仓库根目录执行：
+
+```python
+from google.colab import drive
+drive.mount('/content/drive')
+```
+
+```bash
+!bash run_ablation_colab.sh
+```
+
+脚本会检查数据；缺失时调用既有下载准备流程。它以 `--resume` 运行，因此已存在的 best checkpoint、训练 history、全部 SNR 指标和预测文件会被复用。结果默认保存到：
+
+```text
+/content/drive/MyDrive/ECG/ablation_results/
+```
+
+运行器在 validation set 上搜索 global threshold 和五个 per-class threshold，并对 clean、24、12、6、0、-6 dB 测试集保存三种阈值策略的指标。最终 `final_report/` 包含模型比较、SNR 比较、消融贡献、鲁棒性、最佳模型和 PNG/PDF 图表。
+
+每个 SNR 的 EMD 通过 `RecordNumber` 对齐到 ECG `ecg_id`。若存在对应 noisy EMD 文件，结果标记为 `emd_source=matched_snrXX`；若文件缺失，才使用 clean EMD upper bound，并明确标记 `emd_source=clean_original`、`feature_scenario=clean`，不会混作 matched EMD。完整说明见 [COLAB_ABLATION_GUIDE.md](COLAB_ABLATION_GUIDE.md)。
+
 ## 参考文献
 
 ```bibtex
