@@ -250,7 +250,7 @@ def compute_label_aggregations(df, folder, ctype):
 
     return df
 
-def select_data(XX,YY, ctype, min_samples, outputfolder):
+def select_data(XX,YY, ctype, min_samples, outputfolder, class_order=None):
     # convert multilabel to multi-hot
     mlb = MultiLabelBinarizer()
 
@@ -312,6 +312,16 @@ def select_data(XX,YY, ctype, min_samples, outputfolder):
         y = mlb.transform(Y.all_scp.values)
     else:
         pass
+
+    if class_order is not None:
+        class_order = list(class_order)
+        if set(class_order) != set(mlb.classes_):
+            raise ValueError('Requested class order does not match selected classes: {} != {}'.format(
+                class_order, mlb.classes_.tolist()
+            ))
+        positions = [list(mlb.classes_).index(class_name) for class_name in class_order]
+        y = y[:, positions]
+        mlb.classes_ = np.array(class_order)
 
     # save LabelBinarizer
     with open(outputfolder+'mlb.pkl', 'wb') as tokenizer:

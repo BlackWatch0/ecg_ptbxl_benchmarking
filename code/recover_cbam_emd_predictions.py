@@ -3,21 +3,21 @@ from pathlib import Path
 import os
 
 from experiments.scp_experiment import SCP_Experiment
-from configs.cbam_configs import conf_cbam_xresnet1d101_late_fusion
+from configs.cbam_configs import conf_cbam_xresnet1d101_late_fusion_superdiagnostic
 from models.cbam_xresnet1d_model import cbam_xresnet1d_model
 
 
 datafolder = '../data/ptbxl_clean_no_noise/'
 outputfolder = '../output/'
-experiment_name = 'exp_emd_late_fusion'
+experiment_name = 'exp_emd_late_fusion_superdiagnostic'
 
-config = deepcopy(conf_cbam_xresnet1d101_late_fusion)
+config = deepcopy(conf_cbam_xresnet1d101_late_fusion_superdiagnostic)
 config['parameters']['input_size'] = float(os.environ.get('CBAM_INPUT_SIZE', config['parameters']['input_size']))
 config['parameters']['chunkify_train'] = False
 config['parameters']['chunkify_valid'] = config['parameters']['input_size'] != 10.0
 
 experiment = SCP_Experiment(
-    experiment_name, 'all', datafolder, outputfolder, [config],
+    experiment_name, 'superdiagnostic', datafolder, outputfolder, [config],
     database_filename='ptbxl_database_clean_no_noise.csv', dataset_type='ptbxl'
 )
 experiment.prepare()

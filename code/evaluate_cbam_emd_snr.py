@@ -9,7 +9,7 @@ import pandas as pd
 import wfdb
 from sklearn.metrics import average_precision_score, f1_score, roc_auc_score
 
-from configs.cbam_configs import conf_cbam_xresnet1d101_late_fusion
+from configs.cbam_configs import conf_cbam_xresnet1d101_late_fusion_superdiagnostic
 from models.cbam_xresnet1d_model import cbam_xresnet1d_model
 from utils import utils
 from utils.emd_features import apply_emd_standardizer, load_emd_features
@@ -17,8 +17,8 @@ from utils.emd_features import apply_emd_standardizer, load_emd_features
 
 DATA_ROOT = Path('../data')
 OUTPUT_ROOT = Path('../output')
-EXPERIMENT_NAME = 'exp_emd_late_fusion'
-MODEL_NAME = 'cbam_xresnet1d101_late_fusion'
+EXPERIMENT_NAME = 'exp_emd_late_fusion_superdiagnostic'
+MODEL_NAME = 'cbam_xresnet1d101_late_fusion_superdiagnostic'
 NOISY_ROOT = DATA_ROOT / 'ptbxl_noisy_mixed_shared'
 SNR_SCENARIOS = [('snr24', 24), ('snr12', 12), ('snr6', 6), ('snr0', 0), ('snrm6', -6)]
 
@@ -63,7 +63,7 @@ def load_scalers(data_root):
 
 
 def main():
-    config = deepcopy(conf_cbam_xresnet1d101_late_fusion)
+    config = deepcopy(conf_cbam_xresnet1d101_late_fusion_superdiagnostic)
     model_root = OUTPUT_ROOT / EXPERIMENT_NAME / 'models' / MODEL_NAME
     data_root = OUTPUT_ROOT / EXPERIMENT_NAME / 'data'
     checkpoint = model_root / 'models' / '{}.pth'.format(MODEL_NAME)
@@ -78,8 +78,11 @@ def main():
 
     metadata = pd.read_csv(DATA_ROOT / 'ptbxl_clean_no_noise' / 'ptbxl_database_clean_no_noise.csv', index_col='ecg_id')
     metadata.scp_codes = metadata.scp_codes.apply(ast.literal_eval)
-    labels = utils.compute_label_aggregations(metadata, str(DATA_ROOT / 'ptbxl_clean_no_noise') + '/', 'all')
-    _, labels, y, _ = utils.select_data(np.empty(len(labels), dtype=object), labels, 'all', 0, '/tmp/')
+    labels = utils.compute_label_aggregations(metadata, str(DATA_ROOT / 'ptbxl_clean_no_noise') + '/', 'superdiagnostic')
+    _, labels, y, mlb = utils.select_data(
+        np.empty(len(labels), dtype=object), labels, 'superdiagnostic', 0, '/tmp/',
+        class_order=['NORM', 'MI', 'STTC', 'CD', 'HYP']
+    )
     test_ids = labels.index[labels.strat_fold == 10]
     y_test = y[labels.strat_fold == 10]
     raw_scaler, emd_mean, emd_std, feature_columns = load_scalers(data_root)
@@ -115,7 +118,8 @@ def main():
     pd.DataFrame(results).to_csv(model_root / 'snr_test_results.csv', index=False)
     with open(model_root / 'snr_test_config.json', 'w') as file:
         json.dump({'input_size': 1000, 'sampling_rate': 100, 'test_fold': 10,
-                   'feature_columns': feature_columns, 'scenarios': SNR_SCENARIOS}, file, indent=2)
+                   'feature_columns': feature_columns, 'class_names': mlb.classes_.tolist(),
+                   'scenarios': SNR_SCENARIOS}, file, indent=2)
     print(pd.DataFrame(results).to_string(index=False))
 
 

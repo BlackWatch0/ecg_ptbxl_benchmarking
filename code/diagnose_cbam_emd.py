@@ -1,5 +1,6 @@
 import argparse
 import json
+import pickle
 from pathlib import Path
 
 import numpy as np
@@ -63,8 +64,8 @@ def label_summary(labels, split):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--experiment', default='exp_emd_late_fusion')
-    parser.add_argument('--model', default='cbam_xresnet1d101_late_fusion')
+    parser.add_argument('--experiment', default='exp_emd_late_fusion_superdiagnostic')
+    parser.add_argument('--model', default='cbam_xresnet1d101_late_fusion_superdiagnostic')
     parser.add_argument('--output-root', default='../output')
     parser.add_argument('--thresholds', nargs='+', type=float, default=[0.5, 0.3])
     args = parser.parse_args()
@@ -86,6 +87,9 @@ def main():
     if y_logits is not None and y_logits.shape != y_val.shape:
         raise ValueError('Validation logits {} do not match labels {}'.format(y_logits.shape, y_val.shape))
     report = {}
+    with open(data_root / 'mlb.pkl', 'rb') as file:
+        class_names = pickle.load(file).classes_.tolist()
+    report['class_names'] = class_names
     report.update(label_summary(y_train, 'train'))
     report.update(label_summary(y_val, 'val'))
     report.update(label_summary(y_test, 'test'))
@@ -115,7 +119,7 @@ def main():
         report['threshold_{}'.format(threshold)]['valid_auc_class_count'] = int(np.isfinite(metrics['per_class_roc_auc']).sum())
         report['threshold_{}'.format(threshold)]['excluded_auc_class_count'] = int(np.isnan(metrics['per_class_roc_auc']).sum())
         per_class = pd.DataFrame({
-            'class_index': range(y_val.shape[1]),
+            'class_name': class_names,
             'positive_support': y_val.sum(axis=0).astype(int),
             'negative_support': (len(y_val) - y_val.sum(axis=0)).astype(int),
             'roc_auc': metrics['per_class_roc_auc'],

@@ -9,6 +9,8 @@ from itertools import repeat
 from pathlib import Path
 from utils import emd_features
 
+SUPERCLASS_LABELS = ['NORM', 'MI', 'STTC', 'CD', 'HYP']
+
 class SCP_Experiment():
     '''
         Experiment on SCP-ECG statements. All experiments based on SCP are performed and evaluated the same way.
@@ -48,7 +50,12 @@ class SCP_Experiment():
         self.labels = utils.compute_label_aggregations(self.raw_labels, self.datafolder, self.task)
 
         # Select relevant data and convert to one-hot
-        self.data, self.labels, self.Y, _ = utils.select_data(self.data, self.labels, self.task, self.min_samples, self.outputfolder+self.experiment_name+'/data/')
+        class_order = SUPERCLASS_LABELS if self.task == 'superdiagnostic' else None
+        self.data, self.labels, self.Y, self.mlb = utils.select_data(
+            self.data, self.labels, self.task, self.min_samples,
+            self.outputfolder+self.experiment_name+'/data/', class_order=class_order
+        )
+        print('Task: {}, classes: {}'.format(self.task, self.mlb.classes_.tolist()))
         self.emd_data = None
         self.emd_feature_columns = None
         emd_config = self._get_emd_config()
@@ -231,6 +238,9 @@ class SCP_Experiment():
                 'waveform_scenario': config.get('waveform_scenario', scenario),
                 'emd_feature_file': str(paths[scenario]),
                 'feature_columns': columns,
+                'task': self.task,
+                'num_classes': int(self.Y.shape[1]),
+                'class_names': self.mlb.classes_.tolist(),
                 'number_of_emd_features': len(columns),
                 'number_of_dropped_records': len(incomplete),
                 'dropped_record_ids': [int(record_id) for record_id in incomplete],

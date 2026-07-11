@@ -36,6 +36,13 @@ conf_cbam_xresnet1d101_late_fusion = {
 }
 
 
+conf_cbam_xresnet1d101_late_fusion_superdiagnostic = {
+    'modelname': 'cbam_xresnet1d101_late_fusion_superdiagnostic',
+    'modeltype': 'cbam_xresnet1d_model',
+    'parameters': dict(conf_cbam_xresnet1d101_late_fusion['parameters'])
+}
+
+
 conf_cbam_xresnet1d101_ecg_only = {
     'modelname': 'cbam_xresnet1d101_ecg_only',
     'modeltype': 'cbam_xresnet1d_model',
@@ -49,6 +56,13 @@ conf_cbam_xresnet1d101_ecg_only = {
         epochs=50,
         lr=1e-2,
     )
+}
+
+
+conf_cbam_xresnet1d101_ecg_only_superdiagnostic = {
+    'modelname': 'cbam_xresnet1d101_ecg_only_superdiagnostic',
+    'modeltype': 'cbam_xresnet1d_model',
+    'parameters': dict(conf_cbam_xresnet1d101_ecg_only['parameters'])
 }
 
 
@@ -75,4 +89,11 @@ conf_cbam_xresnet1d101_feature_only = {
         epochs=50,
         lr=1e-2,
     )
+}
+
+
+conf_cbam_xresnet1d101_feature_only_superdiagnostic = {
+    'modelname': 'cbam_xresnet1d101_feature_only_superdiagnostic',
+    'modeltype': 'cbam_xresnet1d_model',
+    'parameters': dict(conf_cbam_xresnet1d101_feature_only['parameters'])
 }
