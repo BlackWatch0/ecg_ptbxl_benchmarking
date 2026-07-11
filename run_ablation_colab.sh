@@ -9,12 +9,7 @@ if [[ ! -d /content/drive/MyDrive ]]; then
   exit 2
 fi
 
-python - <<'PY'
-import importlib.util
-missing = [name for name in ('wfdb', 'yaml', 'sklearn', 'matplotlib') if importlib.util.find_spec(name) is None]
-if missing:
-    raise SystemExit('Missing dependencies: {}. Install them before running.'.format(', '.join(missing)))
-PY
+python -m pip install -q wfdb pyyaml scikit-learn matplotlib
 
 if ! python "${ROOT}/code/colab_data_setup.py" validate --data-root "${ROOT}/data"; then
   echo "Prepared data is incomplete; downloading and preparing the configured datasets."
