@@ -65,3 +65,15 @@ python reproduce_results.py
 ```
 
 结果目录会保存 `emd_scaler.npz`、`emd_config.json`、标签、预测和 fastai checkpoint。`emd_config.json` 保存所用文件、特征列和被删除记录；`emd_scaler.npz` 保存训练集 scaler 和固定导联顺序。
+
+## 训练诊断
+
+CBAM 配置使用 `input_size=10.0`，因此模型输入是 100 Hz 下完整的 1,000 点、10 秒 ECG。原项目 fastai baseline 的默认 `input_size=2.5` 保持不变，训练时输入 250 点裁剪。
+
+训练后执行：
+
+```bash
+python diagnose_cbam_emd.py --experiment exp_emd_late_fusion --model cbam_xresnet1d101_late_fusion
+```
+
+诊断会保存 validation BCE、全阴性和 class-prior BCE 基线、标签稀疏度、0.5/0.3 阈值完整指标及逐类 ROC-AUC、PR-AUC、F1 到模型结果目录。训练过程会保存 `best_valid_loss.pth`、最终重载后的模型权重和 `training_history.csv`。

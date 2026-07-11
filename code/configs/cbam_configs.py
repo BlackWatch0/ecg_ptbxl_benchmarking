@@ -27,6 +27,9 @@ conf_cbam_xresnet1d101_late_fusion = {
         waveform_scenario='original',
         missing_record_policy='drop',
         feature_log_transform=False,
+        input_size=10.0,
+        chunkify_train=False,
+        chunkify_valid=False,
         epochs=50,
         lr=1e-2,
     )
@@ -40,6 +43,9 @@ conf_cbam_xresnet1d101_ecg_only = {
         input_mode='ecg_only',
         use_cbam=True,
         fusion_type='concat',
+        input_size=10.0,
+        chunkify_train=False,
+        chunkify_valid=False,
         epochs=50,
         lr=1e-2,
     )
@@ -63,6 +69,9 @@ conf_cbam_xresnet1d101_feature_only = {
         waveform_scenario='original',
         missing_record_policy='drop',
         feature_log_transform=False,
+        input_size=10.0,
+        chunkify_train=False,
+        chunkify_valid=False,
         epochs=50,
         lr=1e-2,
     )

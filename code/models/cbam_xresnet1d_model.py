@@ -2,11 +2,14 @@ import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset
+from pathlib import Path
+from functools import partial
 
 from fastai.basic_data import DataBunch
 from fastai.basic_train import Learner
 from fastai.train import *
 from fastai.torch_core import to_np
+from fastai.callbacks.tracker import SaveModelCallback
 
 from models.base_model import ClassificationModel
 from models.cbam_xresnet1d import cbam_xresnet1d101
@@ -66,7 +69,7 @@ class cbam_xresnet1d_model(ClassificationModel):
         self.name = name
         self.num_classes = n_classes
         self.target_fs = freq
-        self.outputfolder = outputfolder
+        self.outputfolder = Path(outputfolder)
         self.input_size = int(input_size * freq)
         self.bs = bs
         self.wd = wd
@@ -134,8 +137,16 @@ class cbam_xresnet1d_model(ClassificationModel):
             logits = learner.model(ecg, features)
         print('first batch ECG/features/labels/logits:', tuple(ecg.shape), tuple(features.shape),
               tuple(labels.shape), tuple(logits.shape))
+        learner.callback_fns.append(partial(SaveModelCallback, monitor='valid_loss', every='improvement',
+                                            name='best_valid_loss'))
         learner.fit_one_cycle(self.epochs, self.lr)
-        learner.save(self.name)
+        learner.load('best_valid_loss')
+        learner.save(self.name, with_opt=True)
+        history = pd.DataFrame({
+            'epoch': range(len(learner.recorder.val_losses)),
+            'valid_loss': [float(loss) for loss in learner.recorder.val_losses]
+        })
+        history.to_csv(str(self.outputfolder / 'training_history.csv'), index=False)
 
     def predict(self, X, full_sequence=True):
         samples = self._coerce_samples(X)
