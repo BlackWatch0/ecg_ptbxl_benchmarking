@@ -330,7 +330,10 @@ def train_model(model, train_loader, valid_loader, config, device, checkpoint, h
                                                     epochs=config['epochs'], steps_per_epoch=len(train_loader))
     criterion = torch.nn.BCEWithLogitsLoss()
     amp = bool(config['mixed_precision'] and device.type == 'cuda' and hasattr(torch.cuda, 'amp'))
-    scaler = torch.cuda.amp.GradScaler() if amp else None
+    if amp and hasattr(torch, 'amp') and hasattr(torch.amp, 'GradScaler'):
+        scaler = torch.amp.GradScaler('cuda')
+    else:
+        scaler = torch.cuda.amp.GradScaler() if amp else None
     best_loss, best_epoch, wait, history = np.inf, -1, 0, []
     started = time.time()
     for epoch in range(config['epochs']):
@@ -339,7 +342,8 @@ def train_model(model, train_loader, valid_loader, config, device, checkpoint, h
         for batch in train_loader:
             optimizer.zero_grad()
             if amp:
-                with torch.cuda.amp.autocast():
+                autocast = torch.amp.autocast('cuda') if hasattr(torch, 'amp') else torch.cuda.amp.autocast()
+                with autocast:
                     logits, labels = forward(model, batch, device, config['use_emd'])
                     loss = criterion(logits, labels)
                 scaler.scale(loss).backward()
@@ -362,6 +366,8 @@ def train_model(model, train_loader, valid_loader, config, device, checkpoint, h
         history.append({'epoch': epoch + 1, 'train_loss': train_loss, 'valid_loss': valid_loss,
                         'learning_rate': optimizer.param_groups[0]['lr']})
         pd.DataFrame(history).to_csv(history_path, index=False)
+        print('{} epoch {}/{} train_loss={:.6f} valid_loss={:.6f}'.format(
+            config['experiment_name'], epoch + 1, config['epochs'], train_loss, valid_loss))
         if valid_loss < best_loss:
             best_loss, best_epoch, wait = valid_loss, epoch + 1, 0
             torch.save({'model': model.state_dict(), 'epoch': best_epoch,
