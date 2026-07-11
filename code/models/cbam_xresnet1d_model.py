@@ -152,6 +152,11 @@ class cbam_xresnet1d_model(ClassificationModel):
         X_train, X_val = self._coerce_samples(X_train), self._coerce_samples(X_val)
         y_train = [np.asarray(y, dtype=np.float32) for y in y_train]
         y_val = [np.asarray(y, dtype=np.float32) for y in y_val]
+        if y_train[0].shape[0] != self.num_classes:
+            raise ValueError('Label dimension {} does not match num_classes {}'.format(
+                y_train[0].shape[0], self.num_classes))
+        print('Train labels: ({}, {}), Val labels: ({}, {}), num_classes: {}'.format(
+            len(y_train), y_train[0].shape[0], len(y_val), y_val[0].shape[0], self.num_classes))
         learner = self._get_learner(X_train, y_train, X_val, y_val)
         inputs, labels = next(iter(learner.data.train_dl))
         ecg, features = inputs

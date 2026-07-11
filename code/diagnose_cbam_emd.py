@@ -89,6 +89,10 @@ def main():
     report = {}
     with open(data_root / 'mlb.pkl', 'rb') as file:
         class_names = pickle.load(file).classes_.tolist()
+    if len(class_names) != y_val.shape[1]:
+        raise ValueError('mlb.pkl class count {} does not match label columns {}'.format(
+            len(class_names), y_val.shape[1]))
+    print('Detected task: {} classes: {}'.format(len(class_names), class_names))
     report['class_names'] = class_names
     report.update(label_summary(y_train, 'train'))
     report.update(label_summary(y_val, 'val'))

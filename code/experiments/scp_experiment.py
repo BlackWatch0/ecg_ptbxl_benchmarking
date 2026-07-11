@@ -55,7 +55,13 @@ class SCP_Experiment():
             self.data, self.labels, self.task, self.min_samples,
             self.outputfolder+self.experiment_name+'/data/', class_order=class_order
         )
-        print('Task: {}, classes: {}'.format(self.task, self.mlb.classes_.tolist()))
+        print('Task: {}, classes: {}, n_classes: {}'.format(self.task, self.mlb.classes_.tolist(), self.Y.shape[1]))
+        if self.task == 'superdiagnostic':
+            expected = ['NORM', 'MI', 'STTC', 'CD', 'HYP']
+            if self.mlb.classes_.tolist() != expected:
+                raise ValueError('Superdiagnostic class order mismatch: {}'.format(self.mlb.classes_.tolist()))
+            if self.Y.shape[1] != 5:
+                raise ValueError('Superdiagnostic must have 5 classes, got {}'.format(self.Y.shape[1]))
         self.emd_data = None
         self.emd_feature_columns = None
         emd_config = self._get_emd_config()

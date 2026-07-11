@@ -36,5 +36,22 @@ python "${ROOT}/code/colab_data_setup.py" validate --data-root "${DATA_ROOT}"
 if [[ "${MODE}" == "--train" ]]; then
   python -m pip install -q fastai==1.0.61
   cd "${ROOT}/code"
+
+  echo "=== Verifying 5-class labels ==="
+  python verify_5class.py
+
+  OLD_OUTPUT="${ROOT}/output/exp_emd_late_fusion_superdiagnostic"
+  if [[ -d "${OLD_OUTPUT}" ]]; then
+    echo "=== Removing previous output directory ==="
+    rm -rf "${OLD_OUTPUT}"
+  fi
+
+  echo "=== Training CBAM-xResNet1D + EMD late fusion ==="
   python run_cbam_emd_experiment.py
+
+  echo "=== Diagnosing validation metrics ==="
+  python diagnose_cbam_emd.py
+
+  echo "=== Evaluating all SNR scenarios ==="
+  python evaluate_cbam_emd_snr.py
 fi

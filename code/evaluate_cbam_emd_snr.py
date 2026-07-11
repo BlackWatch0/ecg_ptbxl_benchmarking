@@ -85,6 +85,9 @@ def main():
     )
     test_ids = labels.index[labels.strat_fold == 10]
     y_test = y[labels.strat_fold == 10]
+    if y_test.shape[1] != 5:
+        raise ValueError('SNR evaluation requires 5-class superdiagnostic labels, got {}'.format(y_test.shape[1]))
+    print('SNR test labels: ({}, {}) classes: {}'.format(y_test.shape[0], y_test.shape[1], mlb.classes_.tolist()))
     raw_scaler, emd_mean, emd_std, feature_columns = load_scalers(data_root)
     manifest = pd.read_csv(NOISY_ROOT / 'ptbxl_noisy_mixed_shared_manifest.csv')
     model_params = {key: value for key, value in config['parameters'].items() if key not in {
