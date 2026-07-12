@@ -336,9 +336,22 @@ def train_model(model, train_loader, valid_loader, config, device, checkpoint, h
         scaler = torch.amp.GradScaler('cuda')
     else:
         scaler = torch.cuda.amp.GradScaler() if amp else None
-    best_loss, best_epoch, history = np.inf, -1, []
+    last_checkpoint = checkpoint.with_name('last_checkpoint.pth')
+    best_loss, best_epoch, history, start_epoch, elapsed = np.inf, -1, [], 0, 0.0
+    if last_checkpoint.exists():
+        state = torch.load(last_checkpoint, map_location=device, weights_only=False)
+        model.load_state_dict(state['model'])
+        optimizer.load_state_dict(state['optimizer'])
+        scheduler.load_state_dict(state['scheduler'])
+        if scaler is not None and state.get('scaler') is not None:
+            scaler.load_state_dict(state['scaler'])
+        best_loss, best_epoch = state['best_valid_loss'], state['best_epoch']
+        start_epoch, elapsed = state['epoch'], state.get('training_time_seconds', 0.0)
+        if history_path.exists():
+            history = pd.read_csv(history_path).to_dict('records')[:start_epoch]
+        print('Resuming {} from epoch {}/{}'.format(config['experiment_name'], start_epoch, config['epochs']))
     started = time.time()
-    for epoch in range(config['epochs']):
+    for epoch in range(start_epoch, config['epochs']):
         model.train()
         train_losses = []
         for batch in train_loader:
@@ -348,12 +361,16 @@ def train_model(model, train_loader, valid_loader, config, device, checkpoint, h
                 with autocast:
                     logits, labels = forward(model, batch, device, config['use_emd'])
                     loss = criterion(logits, labels)
+                if not torch.isfinite(logits).all() or not torch.isfinite(loss):
+                    raise FloatingPointError('Non-finite training logits or loss at epoch {}'.format(epoch + 1))
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 logits, labels = forward(model, batch, device, config['use_emd'])
                 loss = criterion(logits, labels)
+                if not torch.isfinite(logits).all() or not torch.isfinite(loss):
+                    raise FloatingPointError('Non-finite training logits or loss at epoch {}'.format(epoch + 1))
                 loss.backward()
                 optimizer.step()
             scheduler.step()
@@ -363,7 +380,10 @@ def train_model(model, train_loader, valid_loader, config, device, checkpoint, h
         with torch.no_grad():
             for batch in valid_loader:
                 logits, labels = forward(model, batch, device, config['use_emd'])
-                valid_losses.append(float(criterion(logits, labels).cpu()))
+                valid_loss_batch = criterion(logits, labels)
+                if not torch.isfinite(logits).all() or not torch.isfinite(valid_loss_batch):
+                    raise FloatingPointError('Non-finite validation logits or loss at epoch {}'.format(epoch + 1))
+                valid_losses.append(float(valid_loss_batch.cpu()))
         train_loss, valid_loss = float(np.mean(train_losses)), float(np.mean(valid_losses))
         history.append({'epoch': epoch + 1, 'train_loss': train_loss, 'valid_loss': valid_loss,
                         'learning_rate': optimizer.param_groups[0]['lr']})
@@ -374,7 +394,13 @@ def train_model(model, train_loader, valid_loader, config, device, checkpoint, h
             best_loss, best_epoch = valid_loss, epoch + 1
             torch.save({'model': model.state_dict(), 'epoch': best_epoch,
                         'best_valid_loss': best_loss, 'config': config}, checkpoint)
-    return best_epoch, best_loss, time.time() - started
+        torch.save({'model': model.state_dict(), 'optimizer': optimizer.state_dict(),
+                    'scheduler': scheduler.state_dict(),
+                    'scaler': scaler.state_dict() if scaler is not None else None,
+                    'epoch': epoch + 1, 'best_epoch': best_epoch, 'best_valid_loss': best_loss,
+                    'training_time_seconds': elapsed + time.time() - started,
+                    'config': config}, last_checkpoint)
+    return best_epoch, best_loss, elapsed + time.time() - started
 
 
 def safe_metric(function, y_true, y_prob):
@@ -441,7 +467,8 @@ def experiment_complete(root, name, seed):
     history = root / 'training_logs' / name / 'seed_{}.csv'.format(seed)
     metrics = root / 'metrics' / name / 'seed_{}.csv'.format(seed)
     predictions = root / 'predictions' / name / 'seed_{}'.format(seed)
-    return checkpoint.exists() and history.exists() and metrics.exists() and all(
+    history_complete = history.exists() and len(pd.read_csv(history)) >= 50
+    return checkpoint.exists() and history_complete and metrics.exists() and all(
         (predictions / 'test_predictions_{}.csv'.format(scenario)).exists()
         for scenario, _ in SNR_SCENARIOS)
 
@@ -517,7 +544,8 @@ def run_one(name, seed, bundle, config, output_root, device, args):
     batch_size = config['batch_size']
     best_epoch = best_loss = training_seconds = None
     try:
-        if not checkpoint.exists() and not args.skip_training and not args.evaluate_only:
+        history_complete = history_path.exists() and len(pd.read_csv(history_path)) >= config['epochs']
+        if not history_complete and not args.skip_training and not args.evaluate_only:
             for candidate_bs in dict.fromkeys([batch_size, 64, 32]):
                 if candidate_bs > batch_size:
                     continue
