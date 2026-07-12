@@ -215,6 +215,22 @@ subprocess.run(['bash', 'run_ablation_colab.sh'], cwd=str(repo), check=True)
 
 每个 SNR 的 EMD 通过 `RecordNumber` 对齐到 ECG `ecg_id`。若存在对应 noisy EMD 文件，结果标记为 `emd_source=matched_snrXX`；若文件缺失，才使用 clean EMD upper bound，并明确标记 `emd_source=clean_original`、`feature_scenario=clean`，不会混作 matched EMD。完整说明见 [COLAB_ABLATION_GUIDE.md](COLAB_ABLATION_GUIDE.md)。
 
+### 合并剩余 PTB-XL 记录后从零训练
+
+`run_full_ablation_colab.sh` 下载并合并 `ptbxl_original_noisy_remaining.tar` 与 `ptbxl_original_noisy_remaining_plus_mixed_noise.tar`。它会合并 metadata 和 noisy manifest、复制缺失 WFDB 文件、删除旧 raw cache，并验证 full clean metadata、五个 SNR 和 original EMD 的 ID 覆盖关系。结果写入独立目录，不会混入旧的 16,789 条记录实验：
+
+```text
+/content/drive/MyDrive/ECG/ablation_results_full_ptbxl/
+```
+
+在 Colab 挂载 Drive 并同步仓库后执行：
+
+```bash
+!bash run_full_ablation_colab.sh
+```
+
+合并明细会保存到 `data/full_data_merge_report.json`。清理 clean `raw100.npy` 是预期行为，下一次训练会从合并后的 `records100/` 自动重建缓存。
+
 ## 参考文献
 
 ```bibtex
