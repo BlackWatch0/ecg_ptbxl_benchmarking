@@ -164,12 +164,53 @@ python recover_cbam_emd_predictions.py
 
 SE-xResNet1D 消融使用 `run_se_ablation_colab.sh`。标准 1D SE 模块在每个 residual block 的主分支卷积完成后、与 shortcut 相加前执行时间维全局平均池化和通道重标定，与 CBAM 的插入位置一致。脚本只训练 `se_xresnet1d101` 和 `se_xresnet1d101_emd_late_fusion`，不会覆盖已有 baseline/CBAM 结果；它会将六模型报告写入 Google Drive 的 `ECG/se_ablation_results`。
 
-| 实验名 | CBAM | EMD | 输入 |
-|---|---:|---:|---|
-| `xresnet1d101_baseline` | 否 | 否 | ECG |
-| `cbam_xresnet1d101` | 是 | 否 | ECG |
-| `xresnet1d101_emd_late_fusion` | 否 | 是 | ECG + EMD concat |
-| `cbam_xresnet1d101_emd_late_fusion` | 是 | 是 | ECG + EMD concat |
+| 实验名 | CBAM | SE | EMD | 输入 |
+|---|---:|---:|---:|---|
+| `xresnet1d101_baseline` | 否 | 否 | 否 | ECG |
+| `cbam_xresnet1d101` | 是 | 否 | 否 | ECG |
+| `se_xresnet1d101` | 否 | 是 | 否 | ECG |
+| `xresnet1d101_emd_late_fusion` | 否 | 否 | 是 | ECG + EMD concat |
+| `cbam_xresnet1d101_emd_late_fusion` | 是 | 否 | 是 | ECG + EMD concat |
+| `se_xresnet1d101_emd_late_fusion` | 否 | 是 | 是 | ECG + EMD concat |
+
+### SE 消融当前进度（2026-07-12）
+
+已完成：
+
+- 实现标准 1D Squeeze-and-Excitation block，默认 `reduction=16`，并保护小通道的 hidden size 不小于 1；
+- 支持模型工厂参数 `use_se` / `use_cbam`，两者同时启用时直接报错；
+- 注册 ECG-only 和 ECG + EMD late-fusion 两个 SE 实验；
+- 扩展真实数据 smoke test，覆盖输出 shape、有限 logits/loss、backward、SE scale `[B,C,1]`、参数量、split ID 和 EMD 对齐；
+- 实现六模型汇总、贡献分析、鲁棒性指标、复杂度表、PNG/PDF 图表和英文结果简报；
+- 新增真正的 epoch 级断点恢复，保存 model、optimizer、OneCycleLR scheduler、AMP scaler、最佳指标和累计训练时间；
+- 本地模型测试 6 项和报告器测试 2 项通过；Colab Tesla T4 上六模型真实数据 smoke test 全部通过；
+- baseline/CBAM 四模型 50-epoch 结果已保存在 `/content/drive/MyDrive/ECG/ablation_results_full_ptbxl_50_epochs`。
+
+当前阻塞：
+
+- 首次 `se_xresnet1d101` 训练运行至第 39/50 轮后 Colab GPU 配额耗尽；当时最佳 validation loss 为 `0.335922`（epoch 39）；
+- 该次运行开始于 epoch 级恢复功能加入之前，因此 Drive 中保留了 best checkpoint 和 39 轮 history，但没有 optimizer/scheduler 的 `last_checkpoint.pth`；恢复 GPU 后该模型需要从 epoch 1 重新训练，避免用不连续的 OneCycleLR 产生不公平结果；
+- `se_xresnet1d101_emd_late_fusion` 尚未开始正式训练，六模型最终报告和数值结论尚未生成。
+
+Colab GPU 配额恢复后，在已挂载 Google Drive、保留现有 `data/` 的仓库中同步最新 `master`，执行唯一入口：
+
+```bash
+!bash run_se_ablation_colab.sh
+```
+
+SE checkpoint、history、预测、指标和最终报告写入：
+
+```text
+/content/drive/MyDrive/ECG/se_ablation_results/
+```
+
+最终压缩包将写入：
+
+```text
+/content/drive/MyDrive/ECG/se_ablation_results/se_ablation_summary_figures_metrics.zip
+```
+
+相关提交：`5b40064`（SE 消融管线）、`5895a99`（epoch 级断点续跑）。
 
 在 Colab 新建一个代码单元，完整执行以下代码。它会保留已有的 `data/` 目录；即使之前清理工作区时删除了 `.git` 或脚本，也会自动重建仓库并放回数据集。
 
