@@ -3,15 +3,18 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DATA_ROOT="${ROOT}/data"
-DOWNLOAD_ROOT="${COLAB_DOWNLOAD_ROOT:-/content/ecg_downloads}"
-OUTPUT_ROOT="${FULL_ABLATION_OUTPUT_DIR:-/content/drive/MyDrive/ECG/ablation_results_full_ptbxl}"
+DEFAULT_DOWNLOAD_ROOT="${ROOT}/.downloads"
+if [[ -d /content ]]; then
+  DEFAULT_DOWNLOAD_ROOT="/content/ecg_downloads"
+fi
+DOWNLOAD_ROOT="${COLAB_DOWNLOAD_ROOT:-${DEFAULT_DOWNLOAD_ROOT}}"
+DEFAULT_OUTPUT_ROOT="${ROOT}/results/ablation_results_full_ptbxl"
+if [[ -d /content/drive/MyDrive ]]; then
+  DEFAULT_OUTPUT_ROOT="/content/drive/MyDrive/ECG/ablation_results_full_ptbxl"
+fi
+OUTPUT_ROOT="${FULL_ABLATION_OUTPUT_DIR:-${DEFAULT_OUTPUT_ROOT}}"
 CLEAN_PATCH_URL='https://drive.google.com/file/d/1cUF8FSCaGKG4n-QED4NSB4Pb1TSpvEBD/view'
 NOISY_PATCH_URL='https://drive.google.com/file/d/14K_jEbRHTnkiP6Qb2qChB7kN6B9UulHE/view'
-
-if [[ ! -d /content/drive/MyDrive ]]; then
-  echo "Google Drive is not mounted. Mount it before running this script."
-  exit 2
-fi
 
 python -m pip install -q gdown wfdb pyyaml scikit-learn matplotlib
 mkdir -p "${DOWNLOAD_ROOT}" "${OUTPUT_ROOT}"
