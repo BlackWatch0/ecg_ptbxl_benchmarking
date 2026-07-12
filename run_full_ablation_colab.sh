@@ -16,7 +16,7 @@ OUTPUT_ROOT="${FULL_ABLATION_OUTPUT_DIR:-${DEFAULT_OUTPUT_ROOT}}"
 CLEAN_PATCH_URL='https://drive.google.com/file/d/1cUF8FSCaGKG4n-QED4NSB4Pb1TSpvEBD/view'
 NOISY_PATCH_URL='https://drive.google.com/file/d/14K_jEbRHTnkiP6Qb2qChB7kN6B9UulHE/view'
 
-python -m pip install -q gdown wfdb pyyaml scikit-learn matplotlib
+python -m pip install -q gdown wfdb pyyaml scikit-learn matplotlib "pandas==2.2.2"
 mkdir -p "${DOWNLOAD_ROOT}" "${OUTPUT_ROOT}"
 
 if ! python "${ROOT}/code/colab_data_setup.py" validate --data-root "${DATA_ROOT}"; then
