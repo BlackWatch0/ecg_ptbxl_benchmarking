@@ -160,7 +160,9 @@ python recover_cbam_emd_predictions.py
 
 ## 一键消融实验（CBAM + EMD）
 
-`run_ablation_colab.sh` 会依次训练并评估四个固定的五类 `superdiagnostic` 多标签实验。四组实验使用相同的 fold 划分、随机种子、batch size、Adam + OneCycle 学习率策略、`BCEWithLogitsLoss` 和 early stopping 配置。
+`run_ablation_colab.sh` 会依次训练并评估四个固定的五类 `superdiagnostic` 多标签实验。四组实验使用相同的 fold 划分、随机种子、batch size、Adam + OneCycle 学习率策略和 `BCEWithLogitsLoss`，完整训练 50 轮并使用 validation loss 最优 checkpoint 评估。
+
+SE-xResNet1D 消融使用 `run_se_ablation_colab.sh`。标准 1D SE 模块在每个 residual block 的主分支卷积完成后、与 shortcut 相加前执行时间维全局平均池化和通道重标定，与 CBAM 的插入位置一致。脚本只训练 `se_xresnet1d101` 和 `se_xresnet1d101_emd_late_fusion`，不会覆盖已有 baseline/CBAM 结果；它会将六模型报告写入 Google Drive 的 `ECG/se_ablation_results`。
 
 | 实验名 | CBAM | EMD | 输入 |
 |---|---:|---:|---|

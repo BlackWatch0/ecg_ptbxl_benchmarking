@@ -34,33 +34,62 @@ class TemporalAttention1d(nn.Module):
         return torch.sigmoid(self.conv(torch.cat([avg, maximum], dim=1)))
 
 
+class SqueezeExcitation1d(nn.Module):
+    def __init__(self, channels, reduction=16):
+        super().__init__()
+        hidden = max(channels // reduction, 1)
+        self.pool = nn.AdaptiveAvgPool1d(1)
+        self.excitation = nn.Sequential(
+            nn.Conv1d(channels, hidden, kernel_size=1),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(hidden, channels, kernel_size=1),
+            nn.Sigmoid()
+        )
+
+    def scale(self, x):
+        return self.excitation(self.pool(x))
+
+    def forward(self, x):
+        return x * self.scale(x)
+
+
 class CBAMResBlock(ResBlock):
     def __init__(self, *args, **kwargs):
         use_cbam = kwargs.pop('use_cbam', True)
+        use_se = kwargs.pop('use_se', False)
         cbam_reduction = kwargs.pop('cbam_reduction', 16)
         cbam_kernel_size = kwargs.pop('cbam_kernel_size', 7)
+        se_reduction = kwargs.pop('se_reduction', 16)
+        if use_cbam and use_se:
+            raise ValueError('use_se and use_cbam cannot both be true')
         super().__init__(*args, **kwargs)
         channels = self.convs[-1][0].out_channels
         self.cbam = nn.Sequential(
             ChannelAttention1d(channels, cbam_reduction),
             TemporalAttention1d(cbam_kernel_size)
         ) if use_cbam else None
+        self.se = SqueezeExcitation1d(channels, se_reduction) if use_se else None
 
     def forward(self, x):
         residual = self.convpath(x)
         if self.cbam is not None:
             residual = residual * self.cbam[0](residual)
             residual = residual * self.cbam[1](residual)
+        if self.se is not None:
+            residual = self.se(residual)
         return self.act(residual + self.idpath(x))
 
 
 class CBAMXResNet1DLateFusion(nn.Module):
     def __init__(self, expansion=4, layers=(3, 4, 23, 3), num_classes=2,
                  input_channels=12, input_mode='late_fusion', fusion_type='concat',
-                 emd_features=None, feature_hidden_dim=256, feature_embedding_dim=128,
-                 feature_dropout=0.3, fusion_hidden_dim=256, fusion_dropout=0.4, use_cbam=True,
-                 cbam_reduction=16, cbam_kernel_size=7, **kwargs):
+                  emd_features=None, feature_hidden_dim=256, feature_embedding_dim=128,
+                  feature_dropout=0.3, fusion_hidden_dim=256, fusion_dropout=0.4, use_cbam=True,
+                  use_se=False, cbam_reduction=16, cbam_kernel_size=7, se_reduction=16,
+                  **kwargs):
         super().__init__()
+        if use_cbam and use_se:
+            raise ValueError('use_se and use_cbam cannot both be true')
         if input_mode not in ('ecg_only', 'feature_only', 'late_fusion'):
             raise ValueError('input_mode must be ecg_only, feature_only, or late_fusion')
         if fusion_type not in ('concat', 'gated'):
@@ -76,10 +105,11 @@ class CBAMXResNet1DLateFusion(nn.Module):
 
         if input_mode != 'feature_only':
             backbone = XResNet1d(
-                CBAMResBlock, expansion, list(layers), input_channels=input_channels,
-                num_classes=num_classes, use_cbam=use_cbam,
-                cbam_reduction=cbam_reduction, cbam_kernel_size=cbam_kernel_size,
-                **kwargs
+                 CBAMResBlock, expansion, list(layers), input_channels=input_channels,
+                 num_classes=num_classes, use_cbam=use_cbam, use_se=use_se,
+                 cbam_reduction=cbam_reduction, cbam_kernel_size=cbam_kernel_size,
+                 se_reduction=se_reduction,
+                 **kwargs
             )
             self.ecg_backbone = nn.Sequential(*list(backbone.children())[:-1])
             self.ecg_embedding_size = 2 * (64 * expansion)
@@ -168,14 +198,18 @@ class CBAMXResNet1DLateFusion(nn.Module):
 
 
 def cbam_xresnet1d101(**kwargs):
-    return CBAMXResNet1DLateFusion(expansion=4, layers=(3, 4, 23, 3), **kwargs)
+    expansion = kwargs.pop('expansion', 4)
+    layers = kwargs.pop('layers', (3, 4, 23, 3))
+    return CBAMXResNet1DLateFusion(expansion=expansion, layers=layers, **kwargs)
 
 
-def build_model(backbone_name, num_classes, use_cbam=False, use_emd=False,
-                fusion_type=None, emd_features=11, feature_hidden_dim=256,
-                feature_embedding_dim=128, fusion_hidden_dim=256, **kwargs):
+def build_model(backbone_name, num_classes, use_cbam=False, use_se=False, use_emd=False,
+                 fusion_type=None, emd_features=11, feature_hidden_dim=256,
+                 feature_embedding_dim=128, fusion_hidden_dim=256, **kwargs):
     if backbone_name != 'xresnet1d101':
         raise ValueError('Unsupported backbone: {}'.format(backbone_name))
+    if use_cbam and use_se:
+        raise ValueError('use_se and use_cbam cannot both be true')
     if use_emd:
         input_mode = 'late_fusion'
         fusion_type = fusion_type or 'concat'
@@ -183,7 +217,7 @@ def build_model(backbone_name, num_classes, use_cbam=False, use_emd=False,
         input_mode = 'ecg_only'
         fusion_type = 'concat'
     return cbam_xresnet1d101(
-        num_classes=num_classes, input_mode=input_mode, use_cbam=use_cbam,
+        num_classes=num_classes, input_mode=input_mode, use_cbam=use_cbam, use_se=use_se,
         fusion_type=fusion_type, emd_features=emd_features,
         feature_hidden_dim=feature_hidden_dim,
         feature_embedding_dim=feature_embedding_dim,

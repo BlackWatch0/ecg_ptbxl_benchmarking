@@ -7,16 +7,16 @@ learning_rate: 0.01
 weight_decay: 0.01
 optimizer: Adam
 loss: BCEWithLogitsLoss
+early_stopping_patience: 8
 monitor: valid_loss
 save_best_only: true
 threshold_search: true
+se_reduction: 16
 seeds: [42]
 snr_levels: [clean, 24, 12, 6, 0, -6]
 mixed_precision: true
 data_root: data
-output_dir: /content/drive/MyDrive/ECG/ablation_results
+output_dir: /content/drive/MyDrive/ECG/se_ablation_results
 experiments:
-  - xresnet1d101_baseline
-  - cbam_xresnet1d101
-  - xresnet1d101_emd_late_fusion
-  - cbam_xresnet1d101_emd_late_fusion
+  - se_xresnet1d101
+  - se_xresnet1d101_emd_late_fusion

@@ -31,15 +31,17 @@ CLASS_NAMES = ['NORM', 'MI', 'STTC', 'CD', 'HYP']
 SNR_SCENARIOS = [('clean', None), ('snr24', 24), ('snr12', 12), ('snr6', 6),
                  ('snr0', 0), ('snrm6', -6)]
 EXPERIMENTS = {
-    'xresnet1d101_baseline': dict(use_cbam=False, use_emd=False, fusion_type='none'),
-    'cbam_xresnet1d101': dict(use_cbam=True, use_emd=False, fusion_type='none'),
-    'xresnet1d101_emd_late_fusion': dict(use_cbam=False, use_emd=True, fusion_type='concat'),
-    'cbam_xresnet1d101_emd_late_fusion': dict(use_cbam=True, use_emd=True, fusion_type='concat'),
+    'xresnet1d101_baseline': dict(use_cbam=False, use_se=False, use_emd=False, fusion_type='none'),
+    'cbam_xresnet1d101': dict(use_cbam=True, use_se=False, use_emd=False, fusion_type='none'),
+    'se_xresnet1d101': dict(use_cbam=False, use_se=True, use_emd=False, fusion_type='none'),
+    'xresnet1d101_emd_late_fusion': dict(use_cbam=False, use_se=False, use_emd=True, fusion_type='concat'),
+    'cbam_xresnet1d101_emd_late_fusion': dict(use_cbam=True, use_se=False, use_emd=True, fusion_type='concat'),
+    'se_xresnet1d101_emd_late_fusion': dict(use_cbam=False, use_se=True, use_emd=True, fusion_type='concat'),
 }
 DEFAULT_CONFIG = {
     'task': 'superdiagnostic', 'num_classes': 5, 'class_names': CLASS_NAMES,
     'epochs': 50, 'batch_size': 128, 'learning_rate': 1e-2, 'weight_decay': 1e-2,
-    'optimizer': 'Adam', 'loss': 'BCEWithLogitsLoss', 'early_stopping_patience': 8,
+    'optimizer': 'Adam', 'loss': 'BCEWithLogitsLoss',
     'monitor': 'valid_loss', 'save_best_only': True, 'threshold_search': True,
     'seeds': [42], 'snr_levels': ['clean', 24, 12, 6, 0, -6],
     'mixed_precision': True, 'data_root': 'data',
@@ -334,7 +336,7 @@ def train_model(model, train_loader, valid_loader, config, device, checkpoint, h
         scaler = torch.amp.GradScaler('cuda')
     else:
         scaler = torch.cuda.amp.GradScaler() if amp else None
-    best_loss, best_epoch, wait, history = np.inf, -1, 0, []
+    best_loss, best_epoch, history = np.inf, -1, []
     started = time.time()
     for epoch in range(config['epochs']):
         model.train()
@@ -369,13 +371,9 @@ def train_model(model, train_loader, valid_loader, config, device, checkpoint, h
         print('{} epoch {}/{} train_loss={:.6f} valid_loss={:.6f}'.format(
             config['experiment_name'], epoch + 1, config['epochs'], train_loss, valid_loss))
         if valid_loss < best_loss:
-            best_loss, best_epoch, wait = valid_loss, epoch + 1, 0
+            best_loss, best_epoch = valid_loss, epoch + 1
             torch.save({'model': model.state_dict(), 'epoch': best_epoch,
                         'best_valid_loss': best_loss, 'config': config}, checkpoint)
-        else:
-            wait += 1
-            if wait >= config['early_stopping_patience']:
-                break
     return best_epoch, best_loss, time.time() - started
 
 
@@ -452,6 +450,7 @@ def smoke_test(bundle, config, device):
     split = bundle['splits']['train']
     if split['ecg'][0].shape != (1000, 12) or split['emd'].shape[1:] != (12, len(bundle['emd_columns'])):
         raise ValueError('Unexpected input shapes ECG {} EMD {}'.format(split['ecg'][0].shape, split['emd'].shape))
+    parameter_counts = {}
     for name, spec in EXPERIMENTS.items():
         model = build_model('xresnet1d101', 5, **spec, emd_features=len(bundle['emd_columns'])).to(device)
         model.train()
@@ -460,12 +459,31 @@ def smoke_test(bundle, config, device):
         logits = model(ecg, emd if spec['use_emd'] else None)
         if logits.shape != (1, 5) or not torch.isfinite(logits).all():
             raise ValueError('{} smoke forward failed with {}'.format(name, tuple(logits.shape)))
-        torch.nn.BCEWithLogitsLoss()(logits, torch.from_numpy(split['labels'][:1]).to(device)).backward()
+        loss = torch.nn.BCEWithLogitsLoss()(logits, torch.from_numpy(split['labels'][:1]).to(device))
+        if not torch.isfinite(loss):
+            raise ValueError('{} smoke loss is not finite'.format(name))
+        loss.backward()
+        parameter_counts[name] = count_parameters(model)[0]
+        if spec['use_se']:
+            se_modules = [module for module in model.modules() if module.__class__.__name__ == 'SqueezeExcitation1d']
+            if not se_modules:
+                raise ValueError('{} does not contain SE blocks'.format(name))
+            sample_channels = se_modules[0].excitation[0].in_channels
+            scale = se_modules[0].scale(torch.randn(2, sample_channels, 17, device=device))
+            if scale.shape != (2, sample_channels, 1) or not torch.isfinite(scale).all():
+                raise ValueError('{} SE scale check failed: {}'.format(name, tuple(scale.shape)))
+            if not any(parameter.grad is not None and torch.isfinite(parameter.grad).all()
+                       for module in se_modules for parameter in module.parameters()):
+                raise ValueError('{} SE backward check failed'.format(name))
         print('Smoke passed: {} -> {}'.format(name, tuple(logits.shape)))
         del model
         gc.collect()
         if device.type == 'cuda':
             torch.cuda.empty_cache()
+    if parameter_counts['se_xresnet1d101'] <= parameter_counts['xresnet1d101_baseline']:
+        raise ValueError('SE parameter count must exceed baseline')
+    if parameter_counts['se_xresnet1d101_emd_late_fusion'] <= parameter_counts['xresnet1d101_emd_late_fusion']:
+        raise ValueError('SE+EMD parameter count must exceed baseline+EMD')
 
 
 def load_checkpoint(model, checkpoint, device):
@@ -500,7 +518,7 @@ def run_one(name, seed, bundle, config, output_root, device, args):
     best_epoch = best_loss = training_seconds = None
     try:
         if not checkpoint.exists() and not args.skip_training and not args.evaluate_only:
-            for candidate_bs in [batch_size, 64, 32]:
+            for candidate_bs in dict.fromkeys([batch_size, 64, 32]):
                 if candidate_bs > batch_size:
                     continue
                 try:
@@ -557,7 +575,8 @@ def run_one(name, seed, bundle, config, output_root, device, args):
                                 feature_scenario=feature_scenario if spec['use_emd'] else 'not_used',
                                 emd_source=emd_source if spec['use_emd'] else 'not_used',
                                 threshold_strategy=strategy, threshold=json.dumps(threshold.tolist()) if hasattr(threshold, 'tolist') else threshold,
-                                use_cbam=spec['use_cbam'], use_emd=spec['use_emd'], fusion_type=spec['fusion_type'],
+                                use_cbam=spec['use_cbam'], use_se=spec['use_se'], use_emd=spec['use_emd'],
+                                se_reduction=config.get('se_reduction', 16), fusion_type=spec['fusion_type'],
                                 best_epoch=best_epoch, best_valid_loss=best_loss,
                                 training_time_seconds=training_seconds, parameter_count=parameter_count,
                                 trainable_parameter_count=trainable_count, inference_time_per_sample_ms=inference_ms,
