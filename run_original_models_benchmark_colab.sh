@@ -6,8 +6,10 @@ DRIVE_ROOT="/content/drive/MyDrive"
 OUTPUT_ROOT="${ORIGINAL_MODELS_BENCHMARK_OUTPUT_DIR:-${DRIVE_ROOT}/ECG/original_models_benchmark}"
 DOWNLOAD_ROOT="${ORIGINAL_MODELS_BENCHMARK_DOWNLOAD_DIR:-/content/original_models_benchmark_downloads}"
 SETUP_ROOT="${ORIGINAL_MODELS_BENCHMARK_DATA_DIR:-/content/original_models_benchmark_data}"
+CLEAN_DRIVE_ID="${ORIGINAL_MODELS_CLEAN_DRIVE_ID:-1jWNXSjqUYV0wJOn2BrrmhzOTsVV_cIoM}"
 NOISY_DRIVE_ID="${ORIGINAL_MODELS_NOISY_DRIVE_ID:-1aCC9jzUUqXJjgrXoRTfRlroOMMSa505u}"
 DENOISED_DRIVE_ID="${ORIGINAL_MODELS_DENOISED_DRIVE_ID:-1gjnomlJreB8ttsuRoOiD8DM8IXaa7ciD}"
+CLEAN_ARCHIVE="${DOWNLOAD_ROOT}/clean.archive"
 NOISY_ARCHIVE="${DOWNLOAD_ROOT}/ptbxl_original_database_plus_mixed_WFDB.tar"
 DENOISED_ARCHIVE="${DOWNLOAD_ROOT}/denoised_WFDB.tar"
 DATA_CONFIG="${SETUP_ROOT}/normalized/original_models_benchmark_data.json"
@@ -55,6 +57,13 @@ download_if_absent() {
   gdown --id "${drive_id}" --output "${destination}.part"
   mv "${destination}.part" "${destination}"
 }
+
+download_if_absent "${CLEAN_DRIVE_ID}" "${CLEAN_ARCHIVE}"
+python "${ROOT}/code/colab_data_setup.py" prepare \
+  --asset clean \
+  --archive "${CLEAN_ARCHIVE}" \
+  --data-root "${ROOT}/data" \
+  --workspace "${DOWNLOAD_ROOT}"
 
 download_if_absent "${NOISY_DRIVE_ID}" "${NOISY_ARCHIVE}"
 download_if_absent "${DENOISED_DRIVE_ID}" "${DENOISED_ARCHIVE}"
