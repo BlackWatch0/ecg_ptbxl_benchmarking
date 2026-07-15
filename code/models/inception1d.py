@@ -3,9 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 
-from fastai.layers import *
-from fastai.core import *
-
 from models.basic_conv1d import AdaptiveConcatPool1d,create_head1d
 
 ########################################################################################################

@@ -21,13 +21,7 @@ import scipy.stats
 import multiprocessing
 import datetime as dt
 from collections import defaultdict, Counter
-from keras.layers import Dropout, Dense, Input
-from keras.models import Model, Sequential
-from keras.models import load_model
-from keras.callbacks import EarlyStopping, ModelCheckpoint
-from keras import backend as K
 from sklearn.metrics import roc_auc_score
-import tensorflow as tf
 from sklearn.preprocessing import StandardScaler
 
 def calculate_entropy(list_values):
@@ -73,8 +67,8 @@ def get_single_ecg_features(signal, waveletname='db6'):
 
 def get_ecg_features(ecg_data, parallel=True):
     if parallel:
-        pool = multiprocessing.Pool(18)
-        return np.array(pool.map(get_single_ecg_features, ecg_data))
+        with multiprocessing.Pool(18) as pool:
+            return np.array(pool.map(get_single_ecg_features, ecg_data))
     else:
         list_features = []
         for signal in tqdm(ecg_data):
@@ -118,24 +112,26 @@ class WaveletModel(ClassificationModel):
             clf.fit(XF_train, y_train)
             pickle.dump(clf, open(self.outputfolder+'clf.pkl', 'wb'))
         elif self.classifier == 'NN':
+            import tensorflow as tf
+
             # standardize input data
             ss = StandardScaler()
             XFT_train = ss.fit_transform(XF_train)
             XFT_val = ss.transform(XF_val)
             pickle.dump(ss, open(self.outputfolder+'ss.pkl', 'wb'))
             # classification stage
-            input_x = Input(shape=(XFT_train.shape[1],))
-            x = Dense(self.n_dense_dim, activation=self.activation)(input_x)
-            x = Dropout(self.dropout)(x)
-            y = Dense(self.n_classes, activation=self.final_activation)(x)
-            self.model = Model(input_x, y)
+            input_x = tf.keras.Input(shape=(XFT_train.shape[1],))
+            x = tf.keras.layers.Dense(self.n_dense_dim, activation=self.activation)(input_x)
+            x = tf.keras.layers.Dropout(self.dropout)(x)
+            y = tf.keras.layers.Dense(self.n_classes, activation=self.final_activation)(x)
+            self.model = tf.keras.Model(input_x, y)
             
             self.model.compile(optimizer='adamax', loss='binary_crossentropy')#, metrics=[keras_macro_auroc])
             # monitor validation error
-            mc_loss = ModelCheckpoint(self.outputfolder +'best_loss_model.h5', monitor='val_loss', mode='min', verbose=1, save_best_only=True)
+            mc_loss = tf.keras.callbacks.ModelCheckpoint(self.outputfolder +'best_loss_model.keras', monitor='val_loss', mode='min', verbose=1, save_best_only=True)
             #mc_score = ModelCheckpoint(self.outputfolder +'best_score_model.h5', monitor='val_keras_macro_auroc', mode='max', verbose=1, save_best_only=True)
             self.model.fit(XFT_train, y_train, validation_data=(XFT_val, y_val), epochs=self.epochs, batch_size=128, callbacks=[mc_loss])#, mc_score])
-            self.model.save(self.outputfolder +'last_model.h5')
+            self.model.save(self.outputfolder +'last_model.keras')
 
     def predict(self, X):
         XF = get_ecg_features(X)
@@ -153,7 +149,9 @@ class WaveletModel(ClassificationModel):
             else:
                 return y_pred[:,1][:,np.newaxis]
         elif self.classifier == 'NN':
+            import tensorflow as tf
+
             ss = pickle.load(open(self.outputfolder+'ss.pkl', 'rb'))#
             XFT = ss.transform(XF)
-            model = load_model(self.outputfolder+'best_loss_model.h5')#'best_score_model.h5', custom_objects={'keras_macro_auroc': keras_macro_auroc})
+            model = tf.keras.models.load_model(self.outputfolder+'best_loss_model.keras')
             return model.predict(XFT)

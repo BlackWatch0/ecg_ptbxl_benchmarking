@@ -212,6 +212,34 @@ SE checkpoint、history、预测、指标和最终报告写入：
 
 相关提交：`5b40064`（SE 消融管线）、`5895a99`（epoch 级断点续跑）。
 
+### 原作者模型三测试域基准
+
+`run_original_models_benchmark_colab.sh` 在 clean PTB-XL folds 1-8 上训练、fold 9 上选择最佳 validation-loss checkpoint，并在 fold 10 的三个测试域上评估：
+
+- clean PTB-XL；
+- [mixed-noise PTB-XL](https://drive.google.com/file/d/1aCC9jzUUqXJjgrXoRTfRlroOMMSa505u/view)，包含 24、12、6、0、-6 dB；
+- [denoised PTB-XL](https://drive.google.com/file/d/1gjnomlJreB8ttsuRoOiD8DM8IXaa7ciD/view)，包含与 noisy 数据相同的记录和 SNR。
+
+基准覆盖原论文复现入口中的七个模型：xResNet1D-101、ResNet1D-Wang、LSTM、BiLSTM、FCN-Wang、Inception1D 和 Wavelet+NN。六个波形网络沿用 250 点随机训练 crop、验证/测试 stride 125 crop 和 max probability 聚合；Wavelet+NN 沿用 db6 level-5 特征、train-only StandardScaler、128 单元全连接层、0.25 dropout 和 Adamax。
+
+在 Colab 挂载 Google Drive、同步最新 `master` 后执行：
+
+```bash
+!bash run_original_models_benchmark_colab.sh
+```
+
+脚本会自动下载并安全解压两个测试归档，按 `ecg_id` 验证 fold-10 完整覆盖，运行 smoke test、断点训练、三阈值评估、逐类指标、图表、Markdown 报告和 ZIP 打包。结果写入：
+
+```text
+/content/drive/MyDrive/ECG/original_models_benchmark/
+```
+
+`final_report/` 包含 `benchmark_summary.csv`、clean/noisy/denoised 对比、去噪贡献、鲁棒性、逐类指标、复杂度、最佳模型 JSON、英文 Markdown 简报，以及完整 PNG/PDF 图表。压缩包为：
+
+```text
+/content/drive/MyDrive/ECG/original_models_benchmark/original_models_benchmark_report.zip
+```
+
 在 Colab 新建一个代码单元，完整执行以下代码。它会保留已有的 `data/` 目录；即使之前清理工作区时删除了 `.git` 或脚本，也会自动重建仓库并放回数据集。
 
 ```python
