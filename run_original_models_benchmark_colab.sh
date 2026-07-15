@@ -10,6 +10,7 @@ CLEAN_DRIVE_ID="${ORIGINAL_MODELS_CLEAN_DRIVE_ID:-1jWNXSjqUYV0wJOn2BrrmhzOTsVV_c
 NOISY_DRIVE_ID="${ORIGINAL_MODELS_NOISY_DRIVE_ID:-1aCC9jzUUqXJjgrXoRTfRlroOMMSa505u}"
 DENOISED_DRIVE_ID="${ORIGINAL_MODELS_DENOISED_DRIVE_ID:-1gjnomlJreB8ttsuRoOiD8DM8IXaa7ciD}"
 CLEAN_ARCHIVE="${DOWNLOAD_ROOT}/clean.archive"
+CLEAN_DRIVE_CACHE="${ORIGINAL_MODELS_CLEAN_CACHE:-${DRIVE_ROOT}/ECG/datasets/ptbxl_1.0.3_records100.tar}"
 NOISY_ARCHIVE="${DOWNLOAD_ROOT}/ptbxl_original_database_plus_mixed_WFDB.tar"
 DENOISED_ARCHIVE="${DOWNLOAD_ROOT}/denoised_WFDB.tar"
 DATA_CONFIG="${SETUP_ROOT}/normalized/original_models_benchmark_data.json"
@@ -62,6 +63,14 @@ prepare_clean_ptbxl() {
   if [[ -f "${ROOT}/data/ptbxl_clean_no_noise/ptbxl_database_clean_no_noise.csv" ]] || \
      [[ -f "${ROOT}/data/ptbxl/ptbxl_database.csv" ]]; then
     echo "Reusing prepared clean PTB-XL"
+    return
+  fi
+  if [[ -f "${CLEAN_DRIVE_CACHE}" ]]; then
+    if [[ -f "${CLEAN_DRIVE_CACHE}.sha256" ]]; then
+      (cd "$(dirname "${CLEAN_DRIVE_CACHE}")" && sha256sum -c "$(basename "${CLEAN_DRIVE_CACHE}").sha256")
+    fi
+    echo "Restoring clean PTB-XL from Drive cache: ${CLEAN_DRIVE_CACHE}"
+    tar -xf "${CLEAN_DRIVE_CACHE}" -C "${ROOT}/data"
     return
   fi
   if download_if_absent "${CLEAN_DRIVE_ID}" "${CLEAN_ARCHIVE}"; then
