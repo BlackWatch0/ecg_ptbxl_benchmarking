@@ -226,10 +226,14 @@ def discover_and_validate(roots, output_dir):
             ids = set(scenario_rows[condition][snr])
             missing = fold10_ids - ids
             extra = ids - fold10_ids
-            if missing or extra:
-                raise ValueError("{} SNR {} fold-10 ID coverage mismatch: {} missing, {} extra; examples missing={}, extra={}".format(
-                    condition, snr, len(missing), len(extra), sorted(missing)[:10], sorted(extra)[:10]))
-            for record_id, (record, source) in sorted(scenario_rows[condition][snr].items()):
+            if missing:
+                raise ValueError("{} SNR {} fold-10 ID coverage mismatch: {} missing; examples={}".format(
+                    condition, snr, len(missing), sorted(missing)[:10]))
+            if extra:
+                print("Ignoring {} non-fold-10 {} records at SNR {}".format(
+                    len(extra), condition, snr))
+            for record_id in sorted(fold10_ids):
+                record, source = scenario_rows[condition][snr][record_id]
                 resolved = _resolve_record(record, source, roots, index)
                 normalized[condition].append((record_id, snr, str(resolved)))
 
