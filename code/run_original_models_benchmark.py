@@ -7,6 +7,7 @@ import json
 import os
 import pickle
 import random
+import tempfile
 import time
 import traceback
 from pathlib import Path
@@ -17,12 +18,12 @@ import torch
 import wfdb
 from sklearn.metrics import (average_precision_score, f1_score, precision_score,
                              recall_score, roc_auc_score)
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import MultiLabelBinarizer, StandardScaler
 from torch.utils.data import DataLoader, Dataset
 
 from models.original_model_factory import (BENCHMARK_MODEL_NAMES, MODEL_NAMES,
-                                           WAVELET_MODEL_NAME,
-                                           build_original_model,
+                                            SE_MODEL_NAME, WAVELET_MODEL_NAME,
+                                            build_original_model,
                                            build_wavelet_nn,
                                            canonical_model_name,
                                            default_learning_rate)
@@ -318,11 +319,87 @@ def smoke_test_data_config(args, output_root, device):
     print('Smoke test passed for six raw-waveform models and Wavelet+NN.')
 
 
-def build_loader(split, training, batch_size, shuffle=None):
-    dataset = CropDataset(split['ecg'], split['labels'], training=training)
+def build_loader(split, training, batch_size, shuffle=None, crop_length=CROP_LENGTH):
+    dataset = CropDataset(split['ecg'], split['labels'], training=training,
+                          crop_length=crop_length)
     return DataLoader(dataset, batch_size=batch_size,
                       shuffle=training if shuffle is None else shuffle,
                       num_workers=0, pin_memory=torch.cuda.is_available())
+
+
+def run_one_batch_smoke_test(args, data_root, device):
+    official_root = data_root / 'ptbxl'
+    required = ['ptbxl_database.csv', 'scp_statements.csv', 'records100']
+    missing = [name for name in required if not (official_root / name).exists()]
+    if missing:
+        raise FileNotFoundError('Official PTB-XL data is missing {} under {}'.format(
+            missing, official_root))
+    if len(args.models) != 1:
+        raise ValueError('--one-batch-smoke-test requires exactly one model')
+
+    model_name = canonical_model_name(args.models[0])
+    if model_name != SE_MODEL_NAME:
+        raise ValueError('--one-batch-smoke-test requires {}'.format(SE_MODEL_NAME))
+
+    metadata = pd.read_csv(official_root / 'ptbxl_database.csv', index_col='ecg_id')
+    metadata.scp_codes = metadata.scp_codes.apply(ast.literal_eval)
+    labels = utils.compute_label_aggregations(metadata, str(official_root) + '/',
+                                               'superdiagnostic')
+    labels = labels[labels.superdiagnostic_len > 0]
+    train_labels = labels[labels.strat_fold <= 8].head(args.batch_size)
+    if len(train_labels) != args.batch_size:
+        raise ValueError('Need {} labeled training records, found {}'.format(
+            args.batch_size, len(train_labels)))
+
+    mlb = MultiLabelBinarizer(classes=CLASS_NAMES)
+    mlb.fit([CLASS_NAMES])
+    targets = mlb.transform(train_labels.superdiagnostic).astype(np.float32)
+    waveforms = np.asarray([
+        wfdb.rdsamp(str(official_root / filename))[0]
+        for filename in train_labels.filename_lr
+    ])
+    if waveforms.shape[1:] != (1000, 12):
+        raise ValueError('Expected records100 waveforms shaped [N, 1000, 12], got {}'.format(
+            waveforms.shape))
+    if not np.isfinite(waveforms).all():
+        raise FloatingPointError('Official PTB-XL batch contains NaN or Inf')
+
+    with tempfile.TemporaryDirectory() as temporary:
+        standardized, _, _ = utils.preprocess_signals(waveforms, [], [], temporary + os.sep)
+    split = {'ecg': standardized, 'labels': targets}
+    loader = build_loader(split, True, args.batch_size, shuffle=False, crop_length=1000)
+    ecg, target, _ = next(iter(loader))
+    ecg, target = ecg.to(device), target.to(device)
+
+    model = build_original_model(model_name).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=default_learning_rate(model_name),
+                                 weight_decay=1e-2)
+    criterion = torch.nn.BCEWithLogitsLoss()
+    optimizer.zero_grad(set_to_none=True)
+    logits = model(ecg)
+    loss = criterion(logits, target)
+    if not torch.isfinite(loss):
+        raise FloatingPointError('One-batch smoke test produced a non-finite loss')
+    parameter_before = next(model.parameters()).detach().clone()
+    loss.backward()
+    backward_success = any(parameter.grad is not None for parameter in model.parameters())
+    optimizer.step()
+    optimizer_step_success = not torch.equal(parameter_before, next(model.parameters()).detach())
+
+    result = {
+        'data_root': str(official_root), 'model_name': model_name,
+        'loss_type': 'BCEWithLogitsLoss', 'input_shape': list(ecg.shape),
+        'label_shape': list(target.shape), 'output_shape': list(logits.shape),
+        'label_names': CLASS_NAMES, 'multi_hot_labels': target.detach().cpu().tolist(),
+        'loss': float(loss.detach().cpu()), 'backward_success': backward_success,
+        'optimizer_step_success': optimizer_step_success,
+        'contains_nan': bool(torch.isnan(ecg).any()),
+        'contains_inf': bool(torch.isinf(ecg).any()), 'device': str(device),
+    }
+    if device.type == 'cuda':
+        result['gpu_name'] = torch.cuda.get_device_name(device)
+        result['gpu_peak_allocated_mib'] = round(torch.cuda.max_memory_allocated(device) / 1024 ** 2, 2)
+    print(json.dumps(result, indent=2))
 
 
 def _autocast(device, enabled):
@@ -890,6 +967,7 @@ def parse_args(argv=None):
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--evaluate-only', action='store_true')
     parser.add_argument('--smoke-test', action='store_true')
+    parser.add_argument('--one-batch-smoke-test', action='store_true')
     parser.add_argument('--no-mixed-precision', action='store_true')
     parser.add_argument('--noisy-manifest')
     parser.add_argument('--noisy-root')
@@ -903,6 +981,16 @@ def main(argv=None):
     apply_data_config(args)
     output_root = Path(args.output_dir).expanduser().resolve()
     data_root = Path(args.data_root).expanduser().resolve()
+    if args.smoke_test and args.one_batch_smoke_test:
+        raise ValueError('--smoke-test and --one-batch-smoke-test cannot be combined')
+    unknown = [name for name in args.models
+               if canonical_model_name(name) not in BENCHMARK_MODEL_NAMES + (SE_MODEL_NAME,)]
+    if unknown:
+        raise ValueError('Unknown models: {}'.format(unknown))
+    device = torch.device(args.device or ('cuda' if torch.cuda.is_available() else 'cpu'))
+    if args.one_batch_smoke_test:
+        run_one_batch_smoke_test(args, data_root, device)
+        return
     prepare_directories(output_root)
     config = {
         'task': 'superdiagnostic', 'class_names': CLASS_NAMES,
@@ -926,11 +1014,6 @@ def main(argv=None):
     obsolete_status = output_root / 'config' / 'wavelet_nn_status.json'
     if obsolete_status.exists():
         obsolete_status.unlink()
-    unknown = [name for name in args.models
-               if canonical_model_name(name) not in BENCHMARK_MODEL_NAMES]
-    if unknown:
-        raise ValueError('Unknown models: {}'.format(unknown))
-    device = torch.device(args.device or ('cuda' if torch.cuda.is_available() else 'cpu'))
     print('Device: {}, output: {}'.format(device, output_root))
     if args.smoke_test:
         smoke_test_data_config(args, output_root, device)
