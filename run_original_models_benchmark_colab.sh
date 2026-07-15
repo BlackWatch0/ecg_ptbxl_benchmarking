@@ -58,12 +58,33 @@ download_if_absent() {
   mv "${destination}.part" "${destination}"
 }
 
-download_if_absent "${CLEAN_DRIVE_ID}" "${CLEAN_ARCHIVE}"
-python "${ROOT}/code/colab_data_setup.py" prepare \
-  --asset clean \
-  --archive "${CLEAN_ARCHIVE}" \
-  --data-root "${ROOT}/data" \
-  --workspace "${DOWNLOAD_ROOT}"
+prepare_clean_ptbxl() {
+  if [[ -f "${ROOT}/data/ptbxl_clean_no_noise/ptbxl_database_clean_no_noise.csv" ]] || \
+     [[ -f "${ROOT}/data/ptbxl/ptbxl_database.csv" ]]; then
+    echo "Reusing prepared clean PTB-XL"
+    return
+  fi
+  if download_if_absent "${CLEAN_DRIVE_ID}" "${CLEAN_ARCHIVE}"; then
+    python "${ROOT}/code/colab_data_setup.py" prepare \
+      --asset clean \
+      --archive "${CLEAN_ARCHIVE}" \
+      --data-root "${ROOT}/data" \
+      --workspace "${DOWNLOAD_ROOT}"
+    return
+  fi
+  echo "Clean Drive asset unavailable; downloading official PTB-XL 1.0.3 records100 from PhysioNet"
+  rm -f "${CLEAN_ARCHIVE}.part"
+  local target="${ROOT}/data/ptbxl"
+  mkdir -p "${target}"
+  wget -q -c -O "${target}/ptbxl_database.csv" \
+    "https://physionet.org/files/ptb-xl/1.0.3/ptbxl_database.csv"
+  wget -q -c -O "${target}/scp_statements.csv" \
+    "https://physionet.org/files/ptb-xl/1.0.3/scp_statements.csv"
+  wget -q -r -c -np -nH --cut-dirs=3 -R 'index.html*' -P "${target}" \
+    "https://physionet.org/files/ptb-xl/1.0.3/records100/"
+}
+
+prepare_clean_ptbxl
 
 download_if_absent "${NOISY_DRIVE_ID}" "${NOISY_ARCHIVE}"
 download_if_absent "${DENOISED_DRIVE_ID}" "${DENOISED_ARCHIVE}"
