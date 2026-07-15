@@ -6,10 +6,10 @@ DRIVE_ROOT="/content/drive/MyDrive"
 OUTPUT_ROOT="${ORIGINAL_MODELS_BENCHMARK_OUTPUT_DIR:-${DRIVE_ROOT}/ECG/original_models_benchmark}"
 DOWNLOAD_ROOT="${ORIGINAL_MODELS_BENCHMARK_DOWNLOAD_DIR:-/content/original_models_benchmark_downloads}"
 SETUP_ROOT="${ORIGINAL_MODELS_BENCHMARK_DATA_DIR:-/content/original_models_benchmark_data}"
-CLEAN_DRIVE_ID="${ORIGINAL_MODELS_CLEAN_DRIVE_ID:-1jWNXSjqUYV0wJOn2BrrmhzOTsVV_cIoM}"
+CLEAN_DRIVE_ID="${ORIGINAL_MODELS_CLEAN_DRIVE_ID:-1SvI2suvuKf4KJ7bikHuGp0PVNAjRJ6Ge}"
 NOISY_DRIVE_ID="${ORIGINAL_MODELS_NOISY_DRIVE_ID:-1aCC9jzUUqXJjgrXoRTfRlroOMMSa505u}"
 DENOISED_DRIVE_ID="${ORIGINAL_MODELS_DENOISED_DRIVE_ID:-1gjnomlJreB8ttsuRoOiD8DM8IXaa7ciD}"
-CLEAN_ARCHIVE="${DOWNLOAD_ROOT}/clean.archive"
+CLEAN_ARCHIVE="${DOWNLOAD_ROOT}/ptb-xl-1.0.3.zip"
 CLEAN_DRIVE_CACHE="${ORIGINAL_MODELS_CLEAN_CACHE:-${DRIVE_ROOT}/ECG/datasets/ptbxl_1.0.3_records100.tar}"
 NOISY_ARCHIVE="${DOWNLOAD_ROOT}/ptbxl_original_database_plus_mixed_WFDB.tar"
 DENOISED_ARCHIVE="${DOWNLOAD_ROOT}/denoised_WFDB.tar"
@@ -62,8 +62,16 @@ download_if_absent() {
 prepare_clean_ptbxl() {
   if [[ -f "${ROOT}/data/ptbxl_clean_no_noise/ptbxl_database_clean_no_noise.csv" ]] || \
      [[ -f "${ROOT}/data/ptbxl/ptbxl_database.csv" ]]; then
-    echo "Reusing prepared clean PTB-XL"
-    return
+    local clean_root="${ROOT}/data/ptbxl"
+    [[ -f "${ROOT}/data/ptbxl_clean_no_noise/ptbxl_database_clean_no_noise.csv" ]] && \
+      clean_root="${ROOT}/data/ptbxl_clean_no_noise"
+    local header_count
+    header_count="$(find "${clean_root}/records100" -name '*.hea' 2>/dev/null | wc -l)"
+    if [[ "${header_count}" -eq 21799 ]]; then
+      echo "Reusing complete clean PTB-XL (${header_count} records)"
+      return
+    fi
+    echo "Ignoring incomplete clean PTB-XL (${header_count}/21799 records)"
   fi
   if [[ -f "${CLEAN_DRIVE_CACHE}" ]]; then
     if [[ -f "${CLEAN_DRIVE_CACHE}.sha256" ]]; then
@@ -71,26 +79,45 @@ prepare_clean_ptbxl() {
     fi
     echo "Restoring clean PTB-XL from Drive cache: ${CLEAN_DRIVE_CACHE}"
     tar -xf "${CLEAN_DRIVE_CACHE}" -C "${ROOT}/data"
+    [[ "$(find "${ROOT}/data/ptbxl/records100" -name '*.hea' | wc -l)" -eq 21799 ]] || \
+      { echo "Drive PTB-XL cache is incomplete" >&2; exit 1; }
     return
   fi
   if download_if_absent "${CLEAN_DRIVE_ID}" "${CLEAN_ARCHIVE}"; then
-    python "${ROOT}/code/colab_data_setup.py" prepare \
-      --asset clean \
-      --archive "${CLEAN_ARCHIVE}" \
-      --data-root "${ROOT}/data" \
-      --workspace "${DOWNLOAD_ROOT}"
+    prepare_official_ptbxl_zip "${CLEAN_ARCHIVE}"
     return
   fi
-  echo "Clean Drive asset unavailable; downloading official PTB-XL 1.0.3 records100 from PhysioNet"
+  echo "Clean Drive asset unavailable; downloading official PTB-XL 1.0.3 ZIP from PhysioNet"
   rm -f "${CLEAN_ARCHIVE}.part"
-  local target="${ROOT}/data/ptbxl"
-  mkdir -p "${target}"
-  wget -q -c -O "${target}/ptbxl_database.csv" \
-    "https://physionet.org/files/ptb-xl/1.0.3/ptbxl_database.csv"
-  wget -q -c -O "${target}/scp_statements.csv" \
-    "https://physionet.org/files/ptb-xl/1.0.3/scp_statements.csv"
-  wget -q -r -c -np -nH --cut-dirs=3 -R 'index.html*' -P "${target}" \
-    "https://physionet.org/files/ptb-xl/1.0.3/records100/"
+  wget -c --show-progress -O "${CLEAN_ARCHIVE}" \
+    "https://physionet.org/content/ptb-xl/get-zip/1.0.3/"
+  prepare_official_ptbxl_zip "${CLEAN_ARCHIVE}"
+}
+
+prepare_official_ptbxl_zip() {
+  python - "$1" "${ROOT}/data" "${DOWNLOAD_ROOT}/ptbxl_zip_extracted" <<'PY'
+import shutil
+import sys
+import zipfile
+from pathlib import Path
+
+archive, data_root, staging = map(Path, sys.argv[1:])
+if staging.exists():
+    shutil.rmtree(staging)
+staging.mkdir(parents=True)
+with zipfile.ZipFile(archive) as source:
+    source.extractall(staging)
+metadata = list(staging.rglob('ptbxl_database.csv'))
+if len(metadata) != 1:
+    raise RuntimeError('Expected one ptbxl_database.csv, found {}'.format(metadata))
+source = metadata[0].parent
+target = data_root / 'ptbxl'
+if target.exists():
+    shutil.rmtree(target)
+target.parent.mkdir(parents=True, exist_ok=True)
+shutil.move(str(source), str(target))
+print('Prepared official PTB-XL: {}'.format(target))
+PY
 }
 
 prepare_clean_ptbxl
