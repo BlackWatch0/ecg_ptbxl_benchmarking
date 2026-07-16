@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "code"))
-from time_domain_robustness.analysis import aggregate_pairs, bootstrap_metrics, compute_metrics, confidence_intervals, matching_report, pair_condition, sample_errors
+from time_domain_robustness.analysis import _bootstrap_draw_values, _bootstrap_weights, aggregate_pairs, bootstrap_inputs, bootstrap_metrics, compute_metrics, confidence_intervals, matching_report, pair_condition, sample_errors
 from time_domain_robustness.constants import FEATURE_COLUMNS
 from time_domain_robustness.io import DuplicateKeyError, classify_file, load_data_root
 
@@ -64,6 +64,40 @@ def test_invalid_condition_and_duplicate_composite_keys_are_rejected(root, tmp_p
     frame().iloc[:1].to_csv(root / "noisy" / "snr_5db" / "extra.csv", index=False)
     with pytest.raises(DuplicateKeyError):
         load_data_root(root)
+
+
+def test_batched_bootstrap_matches_duplicate_record_samples():
+    rows = []
+    for record, offset in ((1, 1.0), (2, 3.0)):
+        for beat, clean in enumerate((10.0, 20.0, np.nan if record == 2 else 30.0)):
+            row = {"RecordNumber": record, "LeadIndex": 0, "BeatIndex": beat, "comparison": "noisy", "SNR": 5}
+            for feature in FEATURE_COLUMNS:
+                row[feature + "_clean"] = clean
+                row[feature + "_comparison"] = clean + offset if np.isfinite(clean) else np.nan
+            rows.append(row)
+    pairs = pd.DataFrame(rows)
+    inputs = bootstrap_inputs(pairs)
+    indices = np.array([[0, 0], [1, 0]])
+    nae, raw, scaled = _bootstrap_draw_values(inputs, _bootstrap_weights(indices, len(inputs.record_ids)))
+    for draw, selected_records in enumerate(indices):
+        sampled = pd.concat([pairs[pairs.RecordNumber == inputs.record_ids[index]] for index in selected_records], ignore_index=True)
+        naive = compute_metrics(sampled).set_index("feature")
+        for column, expected in (("nae", nae[draw]), ("cosine_raw", raw[draw]), ("cosine_scaled", scaled[draw])):
+            assert np.allclose(expected, naive.loc[list(FEATURE_COLUMNS), column].to_numpy(), equal_nan=True)
+
+
+def test_bootstrap_defaults_to_macro_and_can_be_disabled(root, tmp_path):
+    data, _ = load_data_root(root)
+    pairs = pair_condition(data, "noisy", 5)
+    default = bootstrap_metrics(pairs, iterations=2, seed=4, batch_size=1)
+    detailed = bootstrap_metrics(pairs, iterations=2, seed=4, batch_size=2, per_feature=True)
+    assert set(default.feature) == {"__macro__"}
+    assert len(detailed) == 2 * (len(FEATURE_COLUMNS) + 1)
+    output = tmp_path / "output"
+    command = [sys.executable, str(Path(__file__).resolve().parents[1] / "code" / "run_time_domain_robustness.py"), "--data-root", str(root), "--output-dir", str(output), "--evaluation-level", "beat", "--aggregation", "mean", "--bootstrap-iterations", "2", "--bootstrap-batch-size", "1", "--disable-bootstrap"]
+    completed = subprocess.run(command, capture_output=True, text=True)
+    assert completed.returncode == 0, completed.stderr
+    assert pd.read_csv(output / "bootstrap_samples.csv").empty
 
 
 def test_cli_writes_complete_output_contract(root, tmp_path):

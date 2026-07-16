@@ -1,6 +1,8 @@
 """CLI for clean/noisy/denoised time-domain robustness evaluation."""
 
 import argparse
+import logging
+from time import perf_counter
 
 import pandas as pd
 
@@ -17,10 +19,15 @@ def main():
     parser.add_argument("--features", nargs=13, metavar="FEATURE", default=FEATURE_COLUMNS, help="Exactly 13 feature columns; defaults to the registered time-domain archive schema.")
     parser.add_argument("--evaluation-level", choices=("beat", "record", "both"), default="both")
     parser.add_argument("--aggregation", choices=("mean", "median", "both"), default="both")
-    parser.add_argument("--bootstraps", type=int, default=1000)
+    parser.add_argument("--bootstrap-iterations", "--bootstraps", dest="bootstrap_iterations", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--bootstrap-batch-size", type=int, default=100)
+    parser.add_argument("--bootstrap-per-feature", action="store_true")
+    parser.add_argument("--disable-bootstrap", action="store_true")
     parser.add_argument("--all-sample-errors", action="store_true")
     args = parser.parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    started = perf_counter()
     features = tuple(args.features)
     data, quality = load_data_root(args.data_root, features)
     if not (data.Condition == "clean").any():
@@ -39,13 +46,17 @@ def main():
             for aggregation in aggregations:
                 evaluated = aggregate_pairs(pairs, level, aggregation, features)
                 point = compute_metrics(evaluated, features, level, aggregation)
-                draws = bootstrap_metrics(evaluated, features, level, aggregation, args.bootstraps, args.seed)
+                draws = pd.DataFrame() if args.disable_bootstrap else bootstrap_metrics(
+                    evaluated, features, level, aggregation, args.bootstrap_iterations, args.seed,
+                    batch_size=args.bootstrap_batch_size, per_feature=args.bootstrap_per_feature,
+                )
                 metrics.append(confidence_intervals(point, draws))
                 samples.append(draws)
                 errors.append(sample_errors(evaluated, features, None if args.all_sample_errors else 100))
     if not metrics:
         parser.error("No clean/comparison composite keys matched")
     write_outputs(args.output_dir, quality, pd.concat(reports, ignore_index=True), pd.concat(metrics, ignore_index=True), pd.concat(samples, ignore_index=True) if samples else pd.DataFrame(), pd.concat(errors, ignore_index=True), args.all_sample_errors)
+    logging.info("Time-domain robustness evaluation completed in %.3fs", perf_counter() - started)
 
 
 if __name__ == "__main__":

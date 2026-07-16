@@ -1,5 +1,9 @@
 """Composite matching, robust feature metrics, and clustered bootstrap inference."""
 
+from dataclasses import dataclass
+import logging
+from time import perf_counter
+
 import numpy as np
 import pandas as pd
 
@@ -7,6 +11,27 @@ from .constants import FEATURE_COLUMNS, KEY_COLUMNS
 
 
 METRIC_COLUMNS = ("mae", "rmse", "nae", "signed_mean", "signed_median", "absolute_mean", "absolute_median", "pearson_r", "spearman_r", "cosine_raw", "cosine_scaled")
+BOOTSTRAP_METRICS = ("nae", "cosine_raw", "cosine_scaled")
+LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class BootstrapInputs:
+    """Record-level sufficient statistics for clustered bootstrap metrics."""
+
+    record_ids: np.ndarray
+    nae_sums: np.ndarray
+    nae_counts: np.ndarray
+    raw_dot_sums: np.ndarray
+    raw_left_square_sums: np.ndarray
+    raw_right_square_sums: np.ndarray
+    raw_counts: np.ndarray
+    scaled_left_sums: np.ndarray
+    scaled_right_sums: np.ndarray
+    scaled_left_square_sums: np.ndarray
+    scaled_right_square_sums: np.ndarray
+    scaled_cross_sums: np.ndarray
+    scaled_counts: np.ndarray
 
 
 def snr_sort_key(value):
@@ -78,16 +103,96 @@ def compute_metrics(data, features=FEATURE_COLUMNS, level="beat", aggregation="m
     return pd.concat([result, pd.DataFrame([macro])], ignore_index=True)
 
 
-def bootstrap_metrics(data, features=FEATURE_COLUMNS, level="beat", aggregation="mean", iterations=1000, seed=0):
+def bootstrap_inputs(data, features=FEATURE_COLUMNS):
+    """Build per-record NAE and cosine sufficient statistics without DataFrame grouping."""
+    record_ids, inverse = np.unique(data.RecordNumber.to_numpy(), return_inverse=True)
+    shape = (len(record_ids), len(features))
+    statistics = [np.zeros(shape, dtype=float) for _ in range(12)]
+    for column, feature in enumerate(features):
+        left = data[feature + "_clean"].to_numpy(dtype=float)
+        right = data[feature + "_comparison"].to_numpy(dtype=float)
+        finite = np.isfinite(left) & np.isfinite(right)
+        if not finite.any():
+            continue
+        valid_inverse, valid_left, valid_right = inverse[finite], left[finite], right[finite]
+        epsilon = max(np.finfo(float).eps, np.median(np.abs(valid_left)) * 1e-8)
+        values = (
+            np.abs(valid_right - valid_left) / (np.abs(valid_left) + epsilon),
+            np.ones(len(valid_left)),
+            valid_left * valid_right,
+            valid_left ** 2,
+            valid_right ** 2,
+            np.ones(len(valid_left)),
+            valid_left,
+            valid_right,
+            valid_left ** 2,
+            valid_right ** 2,
+            valid_left * valid_right,
+            np.ones(len(valid_left)),
+        )
+        for destination, values_for_statistic in enumerate(values):
+            statistics[destination][:, column] = np.bincount(valid_inverse, weights=values_for_statistic, minlength=len(record_ids))
+    return BootstrapInputs(record_ids, *statistics)
+
+
+def _bootstrap_weights(indices, records):
+    """Count cluster appearances per draw, keeping duplicate records as weights."""
+    offsets = np.arange(len(indices))[:, None] * records
+    return np.bincount((indices + offsets).ravel(), minlength=len(indices) * records).reshape(len(indices), records)
+
+
+def _safe_ratio(numerator, denominator):
+    result = np.full(numerator.shape, np.nan, dtype=float)
+    np.divide(numerator, denominator, out=result, where=denominator != 0)
+    return result
+
+
+def _macro_mean(values):
+    return np.nanmean(values) if np.isfinite(values).any() else np.nan
+
+
+def _bootstrap_draw_values(inputs, weights):
+    """Calculate each draw's feature values from cluster weights and sufficient statistics."""
+    weighted = lambda statistic: weights @ statistic
+    nae = _safe_ratio(weighted(inputs.nae_sums), weighted(inputs.nae_counts))
+    raw_dot, raw_left, raw_right = (weighted(statistic) for statistic in (inputs.raw_dot_sums, inputs.raw_left_square_sums, inputs.raw_right_square_sums))
+    raw = _safe_ratio(raw_dot, np.sqrt(raw_left * raw_right))
+    count = weighted(inputs.scaled_counts)
+    left_sum, right_sum, left_square, right_square, cross = (weighted(statistic) for statistic in (inputs.scaled_left_sums, inputs.scaled_right_sums, inputs.scaled_left_square_sums, inputs.scaled_right_square_sums, inputs.scaled_cross_sums))
+    covariance = cross - left_sum * right_sum / np.where(count, count, 1)
+    left_variance = left_square - left_sum ** 2 / np.where(count, count, 1)
+    right_variance = right_square - right_sum ** 2 / np.where(count, count, 1)
+    scaled = _safe_ratio(covariance, np.sqrt(left_variance * right_variance))
+    return nae, raw, scaled
+
+
+def bootstrap_metrics(data, features=FEATURE_COLUMNS, level="beat", aggregation="mean", iterations=1000, seed=0, batch_size=100, per_feature=False):
+    """Cluster-bootstrap macro NAE/cosines using batched record-count weights."""
     if iterations < 1 or data.empty:
         return pd.DataFrame()
-    groups, rng, samples = [group for _, group in data.groupby("RecordNumber", sort=False)], np.random.RandomState(seed), []
-    for iteration in range(iterations):
-        sample = pd.concat([groups[index] for index in rng.randint(len(groups), size=len(groups))], ignore_index=True)
-        point = compute_metrics(sample, features, level, aggregation)
-        point.insert(0, "bootstrap_iteration", iteration)
-        samples.append(point)
-    return pd.concat(samples, ignore_index=True)
+    if batch_size < 1:
+        raise ValueError("batch_size must be at least 1")
+    started = perf_counter()
+    inputs = bootstrap_inputs(data, features)
+    preparation_seconds = perf_counter() - started
+    rng, rows, records = np.random.default_rng(seed), [], len(inputs.record_ids)
+    for first in range(0, iterations, batch_size):
+        batch_iterations = min(batch_size, iterations - first)
+        indices = rng.integers(records, size=(batch_iterations, records))
+        nae, raw, scaled = _bootstrap_draw_values(inputs, _bootstrap_weights(indices, records))
+        for offset in range(batch_iterations):
+            values = (nae[offset], raw[offset], scaled[offset])
+            if per_feature:
+                for feature, feature_values in zip(features, zip(*values)):
+                    rows.append((first + offset, feature, *feature_values))
+            rows.append((first + offset, "__macro__", *(_macro_mean(value) for value in values)))
+    LOGGER.info("Bootstrap prepared %d records in %.3fs; generated %d draws in %.3fs", records, preparation_seconds, iterations, perf_counter() - started - preparation_seconds)
+    result = pd.DataFrame(rows, columns=["bootstrap_iteration", "feature", *BOOTSTRAP_METRICS])
+    result["comparison"] = data.comparison.iloc[0]
+    result["SNR"] = data.SNR.iloc[0]
+    result["evaluation_level"] = level
+    result["aggregation"] = aggregation
+    return result[["bootstrap_iteration", "comparison", "SNR", "evaluation_level", "aggregation", "feature", *BOOTSTRAP_METRICS]]
 
 
 def confidence_intervals(point, samples, alpha=0.05):

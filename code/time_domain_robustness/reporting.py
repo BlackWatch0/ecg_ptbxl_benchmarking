@@ -7,7 +7,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from .analysis import METRIC_COLUMNS, snr_sort_key
+from .analysis import BOOTSTRAP_METRICS, METRIC_COLUMNS, snr_sort_key
 
 
 def rankings(metrics):
@@ -71,6 +71,8 @@ def write_outputs(output_dir, quality, matching, metrics, bootstrap, errors, all
     matching.to_csv(output / "matching_report.csv", index=False)
     metrics.to_csv(output / "feature_metrics.csv", index=False)
     metrics[metrics.feature == "__macro__"].to_csv(output / "macro_overall.csv", index=False)
+    if bootstrap.empty and not len(bootstrap.columns):
+        bootstrap = pd.DataFrame(columns=["bootstrap_iteration", "comparison", "SNR", "evaluation_level", "aggregation", "feature", *BOOTSTRAP_METRICS])
     bootstrap.to_csv(output / "bootstrap_samples.csv", index=False)
     rankings(metrics).to_csv(output / "feature_ranking.csv", index=False)
     denoising_improvement(metrics).to_csv(output / "denoising_improvement.csv", index=False)
