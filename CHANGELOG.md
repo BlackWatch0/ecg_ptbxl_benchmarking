@@ -6,6 +6,7 @@
 
 - Central `configs/datasets.json` registry for active PTB-XL benchmark assets.
 - Wavelet feature extraction archive registration for clean, noisy, and denoised scenarios.
+- Time-domain feature extraction archive registration and beat-level schema documentation.
 - `docs/DOWNLOAD_LINKS_REVIEW.md` listing active and legacy Drive assets requiring review.
 
 ### Changed

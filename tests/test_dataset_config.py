@@ -18,12 +18,17 @@ def test_dataset_download_config():
         assert item['format'] in {'zip', 'tar'}
         assert item['role']
     assert isinstance(value['feature_archives'], list)
-    assert len(value['feature_archives']) == 1
-    feature = value['feature_archives'][0]
-    assert feature['name'] == 'wavelet_feature_extraction'
-    assert DRIVE_PATTERN.search(feature['url']).group(1) == feature['drive_id']
-    assert Path(feature['archive_name']).name == feature['archive_name']
-    assert feature['format'] == 'tar'
+    assert len(value['feature_archives']) == 2
+    features = {feature['name']: feature for feature in value['feature_archives']}
+    wavelet = features['wavelet_feature_extraction']
+    assert DRIVE_PATTERN.search(wavelet['url']).group(1) == wavelet['drive_id']
+    assert Path(wavelet['archive_name']).name == wavelet['archive_name']
+    assert wavelet['format'] == 'tar'
+    time_domain = features['time_domain_feature_extraction']
+    assert DRIVE_PATTERN.search(time_domain['url']).group(1) == time_domain['drive_id']
+    assert Path(time_domain['archive_name']).name == time_domain['archive_name']
+    assert time_domain['format'] == 'tar'
+    assert time_domain['compression'] == 'zstd'
     pending = value['pending_assets']
     assert pending == [{
         'name': 'emd_features',

@@ -32,6 +32,17 @@
       "archive_name": "Wavelet feature extraction.tar",
       "format": "tar",
       "description": "72 precomputed wavelet statistics across original, mixed-noisy, and denoised PTB-XL scenarios."
+    },
+    {
+      "name": "time_domain_feature_extraction",
+      "scenario": "clean_noisy_denoised",
+      "role": "precomputed_beat_level_time_domain_features",
+      "url": "https://drive.google.com/file/d/1wD8Mb216Xd0pjCJhCUrr2nsDhaBaEi-Q/view",
+      "drive_id": "1wD8Mb216Xd0pjCJhCUrr2nsDhaBaEi-Q",
+      "archive_name": "Time Domain Feature extraction.tar.zst",
+      "format": "tar",
+      "compression": "zstd",
+      "description": "13 beat-level Lead II time-domain/hybrid features for clean, mixed-noisy, and denoised PTB-XL scenarios. Align rows with RecordNumber, LeadIndex, and BeatIndex."
     }
   ],
   "pending_assets": [
