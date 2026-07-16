@@ -234,7 +234,41 @@ SE checkpoint、history、预测、指标和最终报告写入：
 /content/drive/MyDrive/ECG/original_models_benchmark/
 ```
 
-`final_report/` 包含 `benchmark_summary.csv`、clean/noisy/denoised 对比、去噪贡献、鲁棒性、逐类指标、复杂度、最佳模型 JSON、英文 Markdown 简报，以及完整 PNG/PDF 图表。压缩包为：
+测试结果固定由以下部分组成，不生成简化版：
+
+```text
+original_models_benchmark/
+├── config/                 # 配置、数据完整性、标准化器、smoke test
+├── checkpoints/            # best/last checkpoint、阈值和模型信息
+├── training_logs/          # 每模型逐 epoch loss 和 learning rate
+├── features/wavelet_nn/    # 可恢复的 Wavelet 特征缓存
+├── predictions/            # 三种阈值策略的逐记录概率与预测
+├── metrics/                # 整体、逐类、复杂度和对齐指标
+├── errors/
+├── completed_models.json
+├── final_report/
+│   ├── benchmark_summary.csv
+│   ├── clean_comparison.csv
+│   ├── noisy_snr_comparison.csv
+│   ├── denoised_snr_comparison.csv
+│   ├── denoising_contributions.csv
+│   ├── robustness_metrics.csv
+│   ├── mean_domain_metrics.csv
+│   ├── per_class_metrics.csv
+│   ├── model_complexity.csv
+│   ├── best_model_summary.json
+│   ├── ORIGINAL_MODELS_BENCHMARK_RESULTS.md
+│   └── figures/            # 每张图同时保存 PNG 和 PDF
+└── original_models_benchmark_report.zip
+```
+
+三种阈值策略为 `threshold_0.5`、`best_global_threshold` 和 `per_class_thresholds`，均只使用 clean validation fold 9 选择；最终主表使用 `per_class_thresholds`。
+
+整体指标包含 Macro/Micro ROC-AUC、Macro/Micro PR-AUC、Macro/Micro/Samples F1、label accuracy、exact-match accuracy、预测阳性率、平均预测标签数和全零预测率。逐类指标对 `NORM, MI, STTC, CD, HYP` 保存 ROC-AUC、PR-AUC、precision、recall、specificity、F1、正负样本支持数和预测阳性数。
+
+复杂度表保存参数量、可训练参数量、训练时间、最佳 epoch、最佳 validation loss、单样本推理时间和实际 batch size。图表覆盖 noisy/denoised 的 AUC/F1 vs SNR、相对 clean 的下降、clean/-6 dB 逐类结果、参数与推理时间权衡、训练曲线和去噪前后对比。
+
+压缩包为：
 
 ```text
 /content/drive/MyDrive/ECG/original_models_benchmark/original_models_benchmark_report.zip
