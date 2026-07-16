@@ -27,9 +27,20 @@ def discover_feature_files(root):
 
 def classify_file(path, root):
     text = "/".join(Path(path).relative_to(root).with_suffix("").parts).lower()
-    condition = next((name for name in CONDITIONS if re.search(r"(^|[^a-z]){}([^a-z]|$)".format(name), text)), None)
+    parts = {part.lower() for part in Path(path).relative_to(root).parts}
+    if "original" in parts or "originalclean" in text:
+        condition = "clean"
+    elif "denoised" in parts:
+        condition = "denoised"
+    elif "mixed noise" in parts:
+        condition = "noisy"
+    else:
+        condition = next((name for name in CONDITIONS if re.search(r"(^|[^a-z]){}([^a-z]|$)".format(name), text)), None)
     if condition is None:
         raise ValueError("Cannot infer clean/noisy/denoised condition from path: {}".format(path))
+    match = re.search(r"snrm(\d+(?:\.\d+)?)", text)
+    if match:
+        return condition, -float(match.group(1))
     match = re.search(r"(?:snr|db)[_-]?(-?\d+(?:\.\d+)?)", text)
     return condition, float(match.group(1)) if match else None
 
