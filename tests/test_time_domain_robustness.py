@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "code"))
 from time_domain_robustness.analysis import _bootstrap_draw_values, _bootstrap_weights, aggregate_pairs, bootstrap_inputs, bootstrap_metrics, compute_metrics, confidence_intervals, matching_report, pair_condition, sample_errors
 from time_domain_robustness.constants import FEATURE_COLUMNS
 from time_domain_robustness.io import DuplicateKeyError, classify_file, load_data_root
+from time_domain_robustness_v2 import bootstrap_metrics as bootstrap_metrics_v2, clean_scale, compute_metrics as compute_metrics_v2, input_manifest, overlap_audit, pair_condition as pair_condition_v2
 
 
 def frame(offset=0.0, missing=False):
@@ -108,4 +109,39 @@ def test_cli_writes_complete_output_contract(root, tmp_path):
     expected = {"quality_report.csv", "matching_report.csv", "feature_metrics.csv", "macro_overall.csv", "bootstrap_samples.csv", "feature_ranking.csv", "denoising_improvement.csv", "sample_errors_top100.csv"}
     expected |= {"heatmap_{}_nae.{}".format(condition, extension) for condition in ("noisy", "denoised") for extension in ("png", "pdf")}
     expected |= {"snr_robustness.{}".format(extension) for extension in ("png", "pdf")}
+    assert expected <= {path.name for path in output.iterdir()}
+
+
+def test_v2_clean_scale_strict_macro_vectors_and_provenance(root):
+    fallback = clean_scale(np.array([3.0, 3.0, np.nan]))
+    assert fallback.value == 3.0 and fallback.method == "median_absolute_clean"
+    data, _ = load_data_root(root)
+    pairs = pair_condition_v2(data, "noisy", 5)
+    metrics = compute_metrics_v2(pairs)
+    macro = metrics[metrics.feature == "__macro_13d__"].iloc[0]
+    assert macro.clean_scale_method == "strict_13_feature_macro"
+    assert np.isfinite(macro.nmae)
+    assert np.isfinite(macro.cosine_raw_13d) and np.isfinite(macro.cosine_scaled_13d)
+    pairs.loc[0, FEATURE_COLUMNS[0] + "_comparison"] = np.nan
+    assert np.isnan(compute_metrics_v2(pairs).query("feature == '__macro_13d__'").iloc[0].nmae)
+    manifest = input_manifest(root)
+    assert set(manifest.columns) == {"path", "condition", "snr_db", "bytes", "sha256"}
+    assert manifest.sha256.str.fullmatch(r"[0-9a-f]{64}").all()
+    audit = overlap_audit(data)
+    assert set(audit.overlap_keys) == {3}
+    with pytest.raises(ValueError, match="13 unique"):
+        compute_metrics_v2(pair_condition_v2(data, "noisy", 5), FEATURE_COLUMNS[:-1])
+
+
+def test_v2_bootstrap_and_cli_output_contract(root, tmp_path):
+    data, _ = load_data_root(root)
+    pairs = pair_condition_v2(data, "noisy", 5)
+    draws = bootstrap_metrics_v2(pairs, iterations=3, seed=6)
+    assert len(draws) == 3 and set(draws.feature) == {"__macro_13d__"}
+    output = tmp_path / "output-v2"
+    command = [sys.executable, str(Path(__file__).resolve().parents[1] / "code" / "run_time_domain_robustness_v2.py"), "--data-root", str(root), "--output-dir", str(output), "--evaluation-level", "beat", "--aggregation", "mean", "--bootstrap-iterations", "2"]
+    completed = subprocess.run(command, capture_output=True, text=True)
+    assert completed.returncode == 0, completed.stderr
+    expected = {"v2_input_manifest.csv", "v2_quality_report.csv", "v2_overlap_audit.csv", "v2_feature_metrics.csv", "v2_macro_metrics.csv", "v2_bootstrap_samples.csv", "v2_macro_nmae_by_snr.png", "v2_macro_nmae_by_snr.pdf"}
+    expected |= {"v2_heatmap_{}_nmae.{}".format(condition, extension) for condition in ("noisy", "denoised") for extension in ("png", "pdf")}
     assert expected <= {path.name for path in output.iterdir()}
