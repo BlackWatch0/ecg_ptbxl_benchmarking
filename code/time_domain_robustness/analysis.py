@@ -107,8 +107,9 @@ def confidence_intervals(point, samples, alpha=0.05):
 
 def sample_errors(data, features=FEATURE_COLUMNS, limit=100):
     rows = []
+    keys = [key for key in KEY_COLUMNS if key in data.columns]
     for feature in features:
-        table = data[list(KEY_COLUMNS) + ["comparison", "SNR", feature + "_clean", feature + "_comparison"]].copy()
+        table = data[keys + ["comparison", "SNR", feature + "_clean", feature + "_comparison"]].copy()
         table = table.rename(columns={feature + "_clean": "clean_value", feature + "_comparison": "comparison_value"})
         table["feature"], table["signed_error"] = feature, table.comparison_value - table.clean_value
         table["absolute_error"] = table.signed_error.abs()
