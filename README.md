@@ -236,6 +236,8 @@ SE checkpoint、history、预测、指标和最终报告写入：
 }
 ```
 
+当前已登记 `wavelet_feature_extraction`：<https://drive.google.com/file/d/1mGZRk_SJ20miD8DNvK_BjGtQhoJsA60O/view>。它包含 clean、mixed-noisy 和 denoised 场景的预计算 Wavelet 特征；当前 Wavelet+NN 基准仍从 ECG 直接提取 db6 特征，后续 feature-based 工作流可直接复用该归档。其他旧脚本的下载资产及待替换链接见 [`docs/DOWNLOAD_LINKS_REVIEW.md`](docs/DOWNLOAD_LINKS_REVIEW.md)。
+
 `run_original_models_benchmark_colab.sh` 在 clean PTB-XL folds 1-8 上训练、fold 9 上选择最佳 validation-loss checkpoint，并在 fold 10 的三个测试域上评估：
 
 - clean PTB-XL；

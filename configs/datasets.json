@@ -22,5 +22,24 @@
       "format": "tar"
     }
   },
-  "feature_archives": []
+  "feature_archives": [
+    {
+      "name": "wavelet_feature_extraction",
+      "scenario": "clean_noisy_denoised",
+      "role": "precomputed_wavelet_features",
+      "url": "https://drive.google.com/file/d/1mGZRk_SJ20miD8DNvK_BjGtQhoJsA60O/view",
+      "drive_id": "1mGZRk_SJ20miD8DNvK_BjGtQhoJsA60O",
+      "archive_name": "Wavelet feature extraction.tar",
+      "format": "tar",
+      "description": "72 precomputed wavelet statistics across original, mixed-noisy, and denoised PTB-XL scenarios."
+    }
+  ],
+  "pending_assets": [
+    {
+      "name": "emd_features",
+      "role": "emd_late_fusion_features",
+      "status": "source_required",
+      "description": "A replacement EMD feature archive must provide the 11-feature-per-lead schema required by the EMD late-fusion workflows."
+    }
+  ]
 }
