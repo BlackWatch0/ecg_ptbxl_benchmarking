@@ -214,6 +214,28 @@ SE checkpoint、history、预测、指标和最终报告写入：
 
 ### 原作者模型三测试域基准
 
+所有数据下载地址集中在 [`configs/datasets.json`](configs/datasets.json)，当前配置为：
+
+| 配置键 | 用途 | 下载地址 |
+|---|---|---|
+| `ptbxl_original` | clean 训练/验证/测试 | [Google Drive](https://drive.google.com/file/d/1SvI2suvuKf4KJ7bikHuGp0PVNAjRJ6Ge/view) |
+| `ptbxl_noisy` | mixed-noise 测试 | [Google Drive](https://drive.google.com/file/d/1aCC9jzUUqXJjgrXoRTfRlroOMMSa505u/view) |
+| `ptbxl_denoised` | denoised 测试 | [Google Drive](https://drive.google.com/file/d/1gjnomlJreB8ttsuRoOiD8DM8IXaa7ciD/view) |
+
+后续特征提取归档统一添加到配置中的 `feature_archives` 数组，不再向运行脚本写入下载常量。预留格式如下：
+
+```json
+{
+  "name": "unique_feature_name",
+  "scenario": "clean_or_noisy_or_denoised",
+  "role": "model_feature_input",
+  "url": "https://drive.google.com/file/d/FILE_ID/view",
+  "drive_id": "FILE_ID",
+  "archive_name": "features.tar",
+  "format": "tar"
+}
+```
+
 `run_original_models_benchmark_colab.sh` 在 clean PTB-XL folds 1-8 上训练、fold 9 上选择最佳 validation-loss checkpoint，并在 fold 10 的三个测试域上评估：
 
 - clean PTB-XL；

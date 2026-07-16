@@ -1,0 +1,26 @@
+{
+  "datasets": {
+    "ptbxl_original": {
+      "role": "clean_train_validation_test",
+      "url": "https://drive.google.com/file/d/1SvI2suvuKf4KJ7bikHuGp0PVNAjRJ6Ge/view",
+      "drive_id": "1SvI2suvuKf4KJ7bikHuGp0PVNAjRJ6Ge",
+      "archive_name": "ptb-xl-1.0.3.zip",
+      "format": "zip"
+    },
+    "ptbxl_noisy": {
+      "role": "noisy_test",
+      "url": "https://drive.google.com/file/d/1aCC9jzUUqXJjgrXoRTfRlroOMMSa505u/view",
+      "drive_id": "1aCC9jzUUqXJjgrXoRTfRlroOMMSa505u",
+      "archive_name": "ptbxl_original_database_plus_mixed_WFDB.tar",
+      "format": "tar"
+    },
+    "ptbxl_denoised": {
+      "role": "denoised_test",
+      "url": "https://drive.google.com/file/d/1gjnomlJreB8ttsuRoOiD8DM8IXaa7ciD/view",
+      "drive_id": "1gjnomlJreB8ttsuRoOiD8DM8IXaa7ciD",
+      "archive_name": "denoised_WFDB.tar",
+      "format": "tar"
+    }
+  },
+  "feature_archives": []
+}

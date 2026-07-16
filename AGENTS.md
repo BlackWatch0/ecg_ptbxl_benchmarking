@@ -161,6 +161,8 @@ test_evaluate_exp0.py
 
 入口为 `run_original_models_benchmark_colab.sh`。训练固定使用 clean PTB-XL folds 1-8，fold 9 选择 validation-loss 最优 checkpoint，fold 10 在 clean、mixed-noise 和 denoised 三个测试域评估。noisy/denoised 均包含 24、12、6、0、-6 dB，并且必须按 `ecg_id` 对齐。
 
+数据下载地址统一维护在 `configs/datasets.json`，Shell 脚本不得再次硬编码 Drive ID。固定键为 `ptbxl_original`、`ptbxl_noisy`、`ptbxl_denoised`；每项必须包含 `role`、`url`、`drive_id`、`archive_name` 和 `format`。后续特征提取文件添加到 `feature_archives` 数组，建议每项沿用相同字段并增加唯一 `name` 和适用的 `scenario`，不得覆盖原始三数据集配置。
+
 必须包含七个原论文模型：`xresnet1d101`、`resnet1d_wang`、`lstm`、`lstm_bidir`、`fcn_wang`、`inception1d`、`wavelet_nn`。不得用 unsupported 状态或空行伪装 Wavelet+NN 已完成。
 
 固定 Google Drive 根目录：
