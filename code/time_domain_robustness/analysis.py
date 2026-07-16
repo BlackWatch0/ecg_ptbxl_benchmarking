@@ -205,7 +205,10 @@ def confidence_intervals(point, samples, alpha=0.05):
             selected = selected[selected[key].isna()] if pd.isna(row[key]) else selected[selected[key].eq(row[key])]
         output = row.to_dict()
         for metric in METRIC_COLUMNS:
-            output[metric + "_ci_low"], output[metric + "_ci_high"] = selected[metric].quantile(alpha / 2), selected[metric].quantile(1 - alpha / 2)
+            if metric in BOOTSTRAP_METRICS and metric in selected:
+                output[metric + "_ci_low"], output[metric + "_ci_high"] = selected[metric].quantile(alpha / 2), selected[metric].quantile(1 - alpha / 2)
+            else:
+                output[metric + "_ci_low"], output[metric + "_ci_high"] = np.nan, np.nan
         rows.append(output)
     return pd.DataFrame(rows)
 
