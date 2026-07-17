@@ -12,6 +12,7 @@ MARKERS = {
     'emd': 'PTBXL_Batch_Original_EMD_reduced_features.csv',
 }
 RAW_CLEAN_MARKER = 'ptbxl_database.csv'
+RAW_NOISY_MARKER = 'ptbxl_original_database_plus_mixed_manifest.csv'
 TARGETS = {
     'clean': 'ptbxl_clean_no_noise',
     'noisy': 'ptbxl_noisy_mixed_shared',
@@ -70,6 +71,8 @@ def locate(root, marker, asset):
         # Active PTB-XL releases use the upstream metadata filename. The EMD
         # workflow expects an older compatibility name but uses the same rows.
         matches = list(Path(root).rglob(RAW_CLEAN_MARKER))
+    if asset == 'noisy' and not matches:
+        matches = list(Path(root).rglob(RAW_NOISY_MARKER))
     if len(matches) != 1:
         raise ValueError('Expected one {} marker {}, found {}'.format(asset, marker, matches))
     if asset == 'emd':
@@ -98,6 +101,12 @@ def prepare(asset, archive, data_root, workspace, replace=False):
             raise FileNotFoundError('Active clean PTB-XL metadata is missing: {}'.format(raw_metadata))
         shutil.copy2(raw_metadata, target / MARKERS['clean'])
         print('Created EMD compatibility metadata from active PTB-XL: {}'.format(target / MARKERS['clean']))
+    if asset == 'noisy' and not (target / MARKERS['noisy']).exists():
+        raw_manifest = target / RAW_NOISY_MARKER
+        if not raw_manifest.exists():
+            raise FileNotFoundError('Active noisy PTB-XL manifest is missing: {}'.format(raw_manifest))
+        shutil.copy2(raw_manifest, target / MARKERS['noisy'])
+        print('Created EMD compatibility manifest from active noisy PTB-XL: {}'.format(target / MARKERS['noisy']))
     print('Prepared {}: {}'.format(asset, target))
 
 
