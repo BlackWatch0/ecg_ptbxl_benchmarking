@@ -169,21 +169,30 @@ class CBAMXResNet1DLateFusion(nn.Module):
             torch.mean(feature_map, dim=2)
         ], dim=1)
 
-    def forward(self, ecg=None, features=None):
+    def forward(self, ecg=None, features=None, return_intermediates=False):
         if self.input_mode == 'ecg_only':
-            return self.output_layer(self._encode_ecg(ecg))
+            ecg_embedding = self._encode_ecg(ecg)
+            logits = self.output_layer(ecg_embedding)
+            return (logits, {'ecg_embedding': ecg_embedding}) if return_intermediates else logits
         if self.input_mode == 'feature_only':
             if features is None:
                 raise ValueError('feature input is required for feature_only mode')
             self._validate_features(features, features.size(0))
-            return self.output_layer(self.feature_encoder(features))
+            feature_embedding = self.feature_encoder(features)
+            logits = self.output_layer(feature_embedding)
+            return (logits, {'feature_embedding': feature_embedding}) if return_intermediates else logits
         ecg_embedding = self._encode_ecg(ecg)
         self._validate_features(features, ecg_embedding.size(0))
         feature_embedding = self.feature_encoder(features)
         fused = torch.cat([ecg_embedding, feature_embedding], dim=1)
         if self.gate is not None:
             fused = fused * torch.sigmoid(self.gate(fused))
-        return self.output_layer(self.fusion(fused))
+        fusion_embedding = self.fusion(fused)
+        logits = self.output_layer(fusion_embedding)
+        if return_intermediates:
+            return logits, {'ecg_embedding': ecg_embedding, 'feature_embedding': feature_embedding,
+                            'fused_embedding': fused, 'fusion_embedding': fusion_embedding}
+        return logits
 
     def get_layer_groups(self):
         if self.ecg_backbone is None:
