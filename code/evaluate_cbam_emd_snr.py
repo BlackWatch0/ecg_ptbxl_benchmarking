@@ -12,6 +12,7 @@ from sklearn.metrics import average_precision_score, f1_score, roc_auc_score
 from configs.cbam_configs import conf_cbam_xresnet1d101_late_fusion_superdiagnostic
 from models.cbam_xresnet1d_model import cbam_xresnet1d_model
 from utils import utils
+from utils import data_assets
 from utils.emd_features import apply_emd_standardizer, load_emd_features
 
 
@@ -49,12 +50,6 @@ def evaluate(y_true, y_prob, threshold=0.5):
     }
 
 
-def load_noisy_waveforms(manifest, snr, record_ids):
-    rows = manifest[(manifest.snr_target_db == snr) & manifest.ecg_id.isin(record_ids)].set_index('ecg_id')
-    rows = rows.loc[record_ids]
-    return np.array([wfdb.rdsamp(str(NOISY_ROOT / path))[0] for path in rows.wfdb_record_relative])
-
-
 def load_scalers(data_root):
     with open(data_root / 'standard_scaler.pkl', 'rb') as file:
         raw_scaler = pickle.load(file)
@@ -76,9 +71,9 @@ def main():
     if config['parameters']['input_size'] != 10.0:
         raise ValueError('SNR evaluation requires the new 1000-point CBAM checkpoint')
 
-    metadata = pd.read_csv(DATA_ROOT / 'ptbxl_clean_no_noise' / 'ptbxl_database_clean_no_noise.csv', index_col='ecg_id')
-    metadata.scp_codes = metadata.scp_codes.apply(ast.literal_eval)
-    labels = utils.compute_label_aggregations(metadata, str(DATA_ROOT / 'ptbxl_clean_no_noise') + '/', 'superdiagnostic')
+    clean_root = data_assets.clean_dataset_root(DATA_ROOT)
+    metadata = data_assets.load_metadata(clean_root, 'ptbxl_database_clean_no_noise.csv')
+    labels = utils.compute_label_aggregations(metadata, str(clean_root) + '/', 'superdiagnostic')
     _, labels, y, mlb = utils.select_data(
         np.empty(len(labels), dtype=object), labels, 'superdiagnostic', 0, '/tmp/',
         class_order=['NORM', 'MI', 'STTC', 'CD', 'HYP']
@@ -89,7 +84,7 @@ def main():
         raise ValueError('SNR evaluation requires 5-class superdiagnostic labels, got {}'.format(y_test.shape[1]))
     print('SNR test labels: ({}, {}) classes: {}'.format(y_test.shape[0], y_test.shape[1], mlb.classes_.tolist()))
     raw_scaler, emd_mean, emd_std, feature_columns = load_scalers(data_root)
-    manifest = pd.read_csv(NOISY_ROOT / 'ptbxl_noisy_mixed_shared_manifest.csv')
+    manifest, noisy_root = data_assets.load_noisy_manifest(DATA_ROOT)
     model_params = {key: value for key, value in config['parameters'].items() if key not in {
         'emd_feature_paths', 'emd_scenario', 'waveform_scenario', 'missing_record_policy',
         'feature_log_transform', 'log_feature_columns'
@@ -100,7 +95,7 @@ def main():
     results = []
     for scenario, snr in SNR_SCENARIOS:
         print('Evaluating {} dB...'.format(snr))
-        X_ecg = utils.apply_standardizer(load_noisy_waveforms(manifest, snr, test_ids), raw_scaler)
+        X_ecg = utils.apply_standardizer(data_assets.load_manifest_waveforms(manifest, noisy_root, snr, test_ids), raw_scaler)
         emd_ids, X_emd, incomplete = load_emd_features(
             config['parameters']['emd_feature_paths'][scenario], labels, feature_columns,
             test_ids, missing_record_policy='error'

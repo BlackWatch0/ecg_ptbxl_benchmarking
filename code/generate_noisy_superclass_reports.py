@@ -8,6 +8,7 @@ import pandas as pd
 from sklearn.metrics import accuracy_score, average_precision_score, f1_score, hamming_loss, precision_score, recall_score, roc_auc_score
 
 from utils import utils
+from utils import data_assets
 
 
 SCRIPT_VERSION = '0.1.0'
@@ -139,9 +140,9 @@ def superclass_data(metadata, test_ids, mlb):
 
 def main():
     print(f'Noisy superclass report generation v{SCRIPT_VERSION}')
-    manifest = pd.read_csv(NOISY_ROOT / 'ptbxl_noisy_mixed_shared_manifest.csv')
-    metadata = pd.read_csv(CLEAN_ROOT / 'ptbxl_database_clean_no_noise.csv', index_col='ecg_id')
-    metadata.scp_codes = metadata.scp_codes.apply(ast.literal_eval)
+    manifest, _ = data_assets.load_noisy_manifest(DATA_ROOT)
+    clean_root = data_assets.clean_dataset_root(DATA_ROOT)
+    metadata = data_assets.load_metadata(clean_root, 'ptbxl_database_clean_no_noise.csv')
     test_ids = metadata.index[metadata.strat_fold == 10]
     mlb = load_pickle(EXPERIMENT_ROOT / 'data' / 'mlb.pkl')
     class_names, y_true, prediction_indices = superclass_data(metadata, test_ids, mlb)

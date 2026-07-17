@@ -27,6 +27,7 @@ from models.original_model_factory import (BENCHMARK_MODEL_NAMES, MODEL_NAMES,
                                            canonical_model_name,
                                            default_learning_rate)
 from utils import utils
+from utils import data_assets
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -133,18 +134,13 @@ def prepare_directories(root):
 
 
 def load_clean_data(data_root, output_root):
-    candidates = [
-        (data_root / 'ptbxl_clean_no_noise', 'ptbxl_database_clean_no_noise.csv'),
-        (data_root / 'ptbxl', 'ptbxl_database.csv'),
-    ]
-    available = [(root, filename) for root, filename in candidates if (root / filename).exists()]
-    if not available:
-        raise FileNotFoundError('Missing PTB-XL metadata; checked {}'.format(
-            [str(root / filename) for root, filename in candidates]))
-    clean_root, metadata_filename = available[0]
-    metadata_path = clean_root / metadata_filename
+    clean_root = data_assets.clean_dataset_root(data_root)
+    metadata_filename = next((name for name in ('ptbxl_database_clean_no_noise.csv', 'ptbxl_database.csv')
+                              if (clean_root / name).exists()), None)
+    if metadata_filename is None:
+        raise FileNotFoundError('Missing PTB-XL metadata under {}'.format(clean_root))
     raw, metadata = utils.load_dataset(str(clean_root), 100,
-                                       database_filename=metadata_path.name,
+                                       database_filename=metadata_filename,
                                        dataset_type='ptbxl')
     labels = utils.compute_label_aggregations(metadata, str(clean_root) + '/',
                                                'superdiagnostic')

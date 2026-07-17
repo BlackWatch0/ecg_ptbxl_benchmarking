@@ -15,6 +15,7 @@ from sklearn.metrics import fbeta_score, roc_auc_score, roc_curve, roc_curve, au
 from sklearn.preprocessing import StandardScaler, MultiLabelBinarizer
 from matplotlib.axes._axes import _log as matplotlib_axes_logger
 import warnings
+from utils import data_assets
 
 # EVALUATION STUFF
 def generate_results(idxs, y_true, y_pred, thresholds):
@@ -114,65 +115,14 @@ def apply_thresholds(preds, thresholds):
 # DATA PROCESSING STUFF
 
 def load_dataset(path, sampling_rate, release=False, database_filename=None, dataset_type=None):
-    path = os.path.normpath(path).replace('\\', '/')
-    if path and not path.endswith('/'):
-        path += '/'
-
-    if dataset_type is None:
-        dataset_type = path.split('/')[-2]
-
-    if dataset_type == 'ptbxl':
-        filename = database_filename if database_filename else 'ptbxl_database.csv'
-        Y = pd.read_csv(path + filename, index_col='ecg_id')
-        Y.scp_codes = Y.scp_codes.apply(lambda x: ast.literal_eval(x))
-        X = load_raw_data_ptbxl(Y, sampling_rate, path)
-
-    elif dataset_type == 'ICBEB':
-        filename = database_filename if database_filename else 'icbeb_database.csv'
-        Y = pd.read_csv(path + filename, index_col='ecg_id')
-        Y.scp_codes = Y.scp_codes.apply(lambda x: ast.literal_eval(x))
-        X = load_raw_data_icbeb(Y, sampling_rate, path)
-
-    else:
-        raise ValueError(f"Unknown dataset_type '{dataset_type}'. Expected 'ptbxl' or 'ICBEB'.")
-
-    return X, Y
+    return data_assets.load_dataset(path, sampling_rate, database_filename, dataset_type or 'ptbxl')
 
 
 def load_raw_data_icbeb(df, sampling_rate, path):
-
-    if sampling_rate == 100:
-        if os.path.exists(path + 'raw100.npy'):
-            data = np.load(path+'raw100.npy', allow_pickle=True)
-        else:
-            data = [wfdb.rdsamp(path + 'records100/'+str(f)) for f in tqdm(df.index)]
-            data = np.array([signal for signal, meta in data])
-            pickle.dump(data, open(path+'raw100.npy', 'wb'), protocol=4)
-    elif sampling_rate == 500:
-        if os.path.exists(path + 'raw500.npy'):
-            data = np.load(path+'raw500.npy', allow_pickle=True)
-        else:
-            data = [wfdb.rdsamp(path + 'records500/'+str(f)) for f in tqdm(df.index)]
-            data = np.array([signal for signal, meta in data])
-            pickle.dump(data, open(path+'raw500.npy', 'wb'), protocol=4)
-    return data
+    return data_assets.load_waveforms(df, path, sampling_rate, 'ICBEB')
 
 def load_raw_data_ptbxl(df, sampling_rate, path):
-    if sampling_rate == 100:
-        if os.path.exists(path + 'raw100.npy'):
-            data = np.load(path+'raw100.npy', allow_pickle=True)
-        else:
-            data = [wfdb.rdsamp(path+f) for f in tqdm(df.filename_lr)]
-            data = np.array([signal for signal, meta in data])
-            pickle.dump(data, open(path+'raw100.npy', 'wb'), protocol=4)
-    elif sampling_rate == 500:
-        if os.path.exists(path + 'raw500.npy'):
-            data = np.load(path+'raw500.npy', allow_pickle=True)
-        else:
-            data = [wfdb.rdsamp(path+f) for f in tqdm(df.filename_hr)]
-            data = np.array([signal for signal, meta in data])
-            pickle.dump(data, open(path+'raw500.npy', 'wb'), protocol=4)
-    return data
+    return data_assets.load_waveforms(df, path, sampling_rate, 'ptbxl')
 
 def compute_label_aggregations(df, folder, ctype):
 

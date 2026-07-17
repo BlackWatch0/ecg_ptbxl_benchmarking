@@ -22,6 +22,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from models.cbam_xresnet1d import build_model
 from utils import utils
+from utils import data_assets
 from utils.emd_features import (apply_emd_standardizer, fit_emd_standardizer,
                                 load_emd_features, resolve_emd_feature_columns)
 
@@ -50,21 +51,8 @@ DEFAULT_CONFIG = {
 
 
 def resolve_emd_paths(data_root):
-    """Prefer active EMD 2.0 paths while retaining the legacy archive layout."""
-    root = Path(data_root) / 'emd_features'
-    paths = {'clean': root / 'original/PTBXL_Batch_Original_EMD_reduced_features.csv'}
-    for scenario in ('snr24', 'snr12', 'snr6', 'snr0', 'snrm6'):
-        active = root / 'ptbxl_original_database_plus_mixed' / ('mixed_' + scenario) / (('mixed_' + scenario) + '_plus_mixed_EMD_Features_reduced_features.csv')
-        legacy_names = {
-            'snr24': 'mixed_snr24_MAT_Batch_EMD_reduced_features.csv',
-            'snr12': 'mixed_snr12_MAT_Batch_EMD_reduced_features.csv',
-            'snr6': 'mixed_snr6_DenoisedCSV_EMD_reduced_features.csv',
-            'snr0': 'mixed_snr0_DenoisedCSV_EMD_reduced_features.csv',
-            'snrm6': 'mixed_snrm6_MAT_Batch_EMD_reduced_features.csv',
-        }
-        legacy = root / ('mixed_' + scenario) / legacy_names[scenario]
-        paths[scenario] = active if active.exists() else legacy
-    return paths
+    """Compatibility wrapper for the shared EMD asset resolver."""
+    return data_assets.resolve_emd_paths(data_root)
 
 
 class ECGDataset(Dataset):
@@ -166,10 +154,8 @@ def eprint_environment(device):
 def load_data(config, output_root):
     configured_root = Path(config['data_root'])
     data_root = (configured_root if configured_root.is_absolute() else REPO_ROOT / configured_root).resolve()
-    clean_root = data_root / 'ptbxl_clean_no_noise'
+    clean_root = data_assets.clean_dataset_root(data_root)
     metadata_path = clean_root / 'ptbxl_database_clean_no_noise.csv'
-    if not metadata_path.exists():
-        raise FileNotFoundError('Missing clean PTB-XL metadata: {}'.format(metadata_path))
     raw, metadata = utils.load_dataset(str(clean_root), 100,
                                        database_filename=metadata_path.name, dataset_type='ptbxl')
     labels = utils.compute_label_aggregations(metadata, str(clean_root) + '/', 'superdiagnostic')
@@ -221,9 +207,8 @@ def load_smoke_data(config, output_root):
     """Load real records without depending on the optional raw100.npy cache."""
     configured_root = Path(config['data_root'])
     data_root = (configured_root if configured_root.is_absolute() else REPO_ROOT / configured_root).resolve()
-    clean_root = data_root / 'ptbxl_clean_no_noise'
-    metadata = pd.read_csv(clean_root / 'ptbxl_database_clean_no_noise.csv', index_col='ecg_id')
-    metadata.scp_codes = metadata.scp_codes.apply(ast.literal_eval)
+    clean_root = data_assets.clean_dataset_root(data_root)
+    metadata = data_assets.load_metadata(clean_root, 'ptbxl_database_clean_no_noise.csv')
     labels = utils.compute_label_aggregations(metadata, str(clean_root) + '/', 'superdiagnostic')
     placeholder = np.empty(len(labels), dtype=object)
     _, labels, targets, mlb = utils.select_data(placeholder, labels, 'superdiagnostic', 0,
@@ -259,11 +244,7 @@ def load_smoke_data(config, output_root):
 
 def load_noisy_ecg(bundle, scenario, snr):
     test = bundle['splits']['test']
-    noisy_root = bundle['root'] / 'ptbxl_noisy_mixed_shared'
-    manifest_path = noisy_root / 'ptbxl_noisy_mixed_shared_manifest.csv'
-    if not manifest_path.exists():
-        raise FileNotFoundError('Missing noisy manifest: {}'.format(manifest_path))
-    manifest = pd.read_csv(manifest_path)
+    manifest, noisy_root = data_assets.load_noisy_manifest(bundle['root'])
     rows = manifest[manifest.snr_target_db == snr].set_index('ecg_id')
     duplicates = rows.index[rows.index.duplicated()].unique().tolist()
     missing = [int(x) for x in test['ids'] if x not in rows.index]
@@ -271,7 +252,7 @@ def load_noisy_ecg(bundle, scenario, snr):
         raise ValueError('{} waveform alignment failed; duplicate IDs: {}, missing IDs: {}'.format(
             scenario, duplicates[:20], missing[:20]))
     rows = rows.loc[test['ids']]
-    records = np.array([wfdb.rdsamp(str(noisy_root / path))[0] for path in rows.wfdb_record_relative])
+    records = data_assets.load_manifest_waveforms(manifest, noisy_root, snr, test['ids'])
     scaler_path = Path(bundle['scaler_path'])
     import pickle
     with open(scaler_path, 'rb') as file:
