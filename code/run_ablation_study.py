@@ -49,6 +49,24 @@ DEFAULT_CONFIG = {
 }
 
 
+def resolve_emd_paths(data_root):
+    """Prefer active EMD 2.0 paths while retaining the legacy archive layout."""
+    root = Path(data_root) / 'emd_features'
+    paths = {'clean': root / 'original/PTBXL_Batch_Original_EMD_reduced_features.csv'}
+    for scenario in ('snr24', 'snr12', 'snr6', 'snr0', 'snrm6'):
+        active = root / 'ptbxl_original_database_plus_mixed' / ('mixed_' + scenario) / (('mixed_' + scenario) + '_plus_mixed_EMD_Features_reduced_features.csv')
+        legacy_names = {
+            'snr24': 'mixed_snr24_MAT_Batch_EMD_reduced_features.csv',
+            'snr12': 'mixed_snr12_MAT_Batch_EMD_reduced_features.csv',
+            'snr6': 'mixed_snr6_DenoisedCSV_EMD_reduced_features.csv',
+            'snr0': 'mixed_snr0_DenoisedCSV_EMD_reduced_features.csv',
+            'snrm6': 'mixed_snrm6_MAT_Batch_EMD_reduced_features.csv',
+        }
+        legacy = root / ('mixed_' + scenario) / legacy_names[scenario]
+        paths[scenario] = active if active.exists() else legacy
+    return paths
+
+
 class ECGDataset(Dataset):
     def __init__(self, ecg, labels, emd=None):
         self.ecg = ecg
@@ -172,14 +190,7 @@ def load_data(config, output_root):
     train, val, test = split['train'], split['val'], split['test']
     train['ecg'], val['ecg'], test['ecg'] = utils.preprocess_signals(
         train['ecg'], val['ecg'], test['ecg'], str(output_root / 'config') + '/')
-    emd_paths = {
-        'clean': data_root / 'emd_features/original/PTBXL_Batch_Original_EMD_reduced_features.csv',
-        'snr24': data_root / 'emd_features/mixed_snr24/mixed_snr24_MAT_Batch_EMD_reduced_features.csv',
-        'snr12': data_root / 'emd_features/mixed_snr12/mixed_snr12_MAT_Batch_EMD_reduced_features.csv',
-        'snr6': data_root / 'emd_features/mixed_snr6/mixed_snr6_DenoisedCSV_EMD_reduced_features.csv',
-        'snr0': data_root / 'emd_features/mixed_snr0/mixed_snr0_DenoisedCSV_EMD_reduced_features.csv',
-        'snrm6': data_root / 'emd_features/mixed_snrm6/mixed_snrm6_MAT_Batch_EMD_reduced_features.csv',
-    }
+    emd_paths = resolve_emd_paths(data_root)
     existing = [path for path in emd_paths.values() if path.exists()]
     if not (emd_paths['clean'].exists()):
         raise FileNotFoundError('Clean EMD file is required: {}'.format(emd_paths['clean']))
@@ -219,14 +230,7 @@ def load_smoke_data(config, output_root):
                                                  str(output_root / 'config') + '/', CLASS_NAMES)
     if mlb.classes_.tolist() != CLASS_NAMES:
         raise ValueError('Smoke test found incorrect class order {}'.format(mlb.classes_.tolist()))
-    emd_paths = {
-        'clean': data_root / 'emd_features/original/PTBXL_Batch_Original_EMD_reduced_features.csv',
-        'snr24': data_root / 'emd_features/mixed_snr24/mixed_snr24_MAT_Batch_EMD_reduced_features.csv',
-        'snr12': data_root / 'emd_features/mixed_snr12/mixed_snr12_MAT_Batch_EMD_reduced_features.csv',
-        'snr6': data_root / 'emd_features/mixed_snr6/mixed_snr6_DenoisedCSV_EMD_reduced_features.csv',
-        'snr0': data_root / 'emd_features/mixed_snr0/mixed_snr0_DenoisedCSV_EMD_reduced_features.csv',
-        'snrm6': data_root / 'emd_features/mixed_snrm6/mixed_snrm6_MAT_Batch_EMD_reduced_features.csv',
-    }
+    emd_paths = resolve_emd_paths(data_root)
     columns = resolve_emd_feature_columns([path for path in emd_paths.values() if path.exists()])
     split = {}
     masks = {'train': labels.strat_fold <= 8, 'val': labels.strat_fold == 9, 'test': labels.strat_fold == 10}
