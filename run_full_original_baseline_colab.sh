@@ -4,9 +4,10 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DRIVE_ROOT="${ORIGINAL_BASELINE_DRIVE_ROOT:-/content/drive/MyDrive/ECG/original_baseline_clean_noisy_denoised_v1}"
-ARCHIVES="$DRIVE_ROOT/archives"
-WORKSPACE="$DRIVE_ROOT/workspace"
-DATA_CONFIG_DIR="$DRIVE_ROOT/data_config"
+RUNTIME_ROOT="${ORIGINAL_BASELINE_RUNTIME_ROOT:-/content/original_baseline_clean_noisy_denoised_runtime}"
+ARCHIVES="$RUNTIME_ROOT/archives"
+WORKSPACE="$RUNTIME_ROOT/workspace"
+DATA_CONFIG_DIR="$RUNTIME_ROOT/data_config"
 RESULTS="$DRIVE_ROOT/results"
 LOG_DIR="$DRIVE_ROOT/logs"
 LOG_FILE="$LOG_DIR/full_baseline.log"
@@ -35,7 +36,8 @@ declare -A DRIVE_IDS=(
 )
 
 log "Project root: $PROJECT_ROOT"
-log "Drive root: $DRIVE_ROOT"
+log "Runtime data root (not persisted): $RUNTIME_ROOT"
+log "Drive artifact root: $DRIVE_ROOT"
 log "Installing runtime dependencies"
 python -m pip install -q gdown wfdb py7zr rarfile pyyaml scikit-learn matplotlib pandas tensorflow
 
