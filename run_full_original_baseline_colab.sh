@@ -39,7 +39,7 @@ log "Project root: $PROJECT_ROOT"
 log "Runtime data root (not persisted): $RUNTIME_ROOT"
 log "Drive artifact root: $DRIVE_ROOT"
 log "Installing runtime dependencies"
-python -m pip install -q gdown wfdb py7zr rarfile pyyaml scikit-learn matplotlib pandas tensorflow
+python -m pip install -q gdown wfdb py7zr rarfile pyyaml scikit-learn matplotlib 'pandas==2.2.2' tensorflow
 
 for asset in clean noisy denoised; do
   archive="$ARCHIVES/${ARCHIVE_NAMES[$asset]}"
@@ -66,10 +66,18 @@ else
   log "Wrote validated data config: $DATA_CONFIG"
 fi
 
+CLEAN_METADATA="$(find "$WORKSPACE" -type f -name 'ptbxl_database.csv' -print -quit)"
+if [[ -z "$CLEAN_METADATA" ]]; then
+  log "ERROR: Could not locate ptbxl_database.csv below $WORKSPACE"
+  exit 1
+fi
+CLEAN_DATA_ROOT="$(dirname "$CLEAN_METADATA")"
+log "Resolved clean training data root: $CLEAN_DATA_ROOT"
+
 log "Starting/resuming 50-epoch baseline benchmark on CUDA"
 log "Artifacts: checkpoints, histories, thresholds, integrity checks, predictions, per-class and overall metrics"
 python -u "$PROJECT_ROOT/code/run_original_models_benchmark.py" \
-  --data-root "$WORKSPACE" \
+  --data-root "$CLEAN_DATA_ROOT" \
   --data-config "$DATA_CONFIG" \
   --output-dir "$RESULTS" \
   --epochs 50 \
