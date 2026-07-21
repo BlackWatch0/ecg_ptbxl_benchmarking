@@ -46,7 +46,7 @@ for asset in clean noisy denoised; do
   if [[ -f "$archive" ]]; then
     log "Reusing $asset archive: $archive ($(du -h "$archive" | cut -f1))"
   else
-    log "Downloading $asset archive to Drive: $archive"
+    log "Downloading $asset archive to runtime storage: $archive"
     gdown --id "${DRIVE_IDS[$asset]}" --output "$archive"
     log "Downloaded $asset archive: $(du -h "$archive" | cut -f1)"
   fi
@@ -81,6 +81,7 @@ python -u "$PROJECT_ROOT/code/run_original_models_benchmark.py" \
   --data-config "$DATA_CONFIG" \
   --output-dir "$RESULTS" \
   --epochs 50 \
+  --batch-size 256 \
   --seeds 42 \
   --device cuda \
   --resume
