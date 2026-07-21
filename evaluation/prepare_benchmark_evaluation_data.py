@@ -1,4 +1,4 @@
-"""Prepare small aligned NPZ scenarios from original benchmark manifests."""
+"""Prepare aligned NPZ scenarios from original benchmark manifests."""
 from __future__ import annotations
 
 import argparse

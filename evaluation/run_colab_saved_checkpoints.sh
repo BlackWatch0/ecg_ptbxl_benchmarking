@@ -4,9 +4,10 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCENARIO_ROOT="${SCENARIO_ROOT:-/content/standard_evaluation_runtime/scenarios}"
 TRAINING_ROOT="${TRAINING_ROOT:-/content/drive/MyDrive/ECG/original_baseline_clean_noisy_denoised_v1/results}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-/content/drive/MyDrive/ECG/original_baseline_clean_noisy_denoised_v1/standardized_evaluation_smoke}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-/content/drive/MyDrive/ECG/original_baseline_clean_noisy_denoised_v1/standardized_evaluation_full_2198}"
 CONFIG_ROOT="${CONFIG_ROOT:-/content/standard_evaluation_runtime/evaluation_configs}"
 DEVICE="${DEVICE:-cuda}"
+EXPECTED_SAMPLE_COUNT="${EXPECTED_SAMPLE_COUNT:-2198}"
 if (( $# )); then
   MODELS=("$@")
 else
@@ -20,6 +21,11 @@ for required in clean noisy_snr24 noisy_snr12 noisy_snr6 noisy_snr0 noisy_snrm6 
                 denoised_snr24 denoised_snr12 denoised_snr6 denoised_snr0 denoised_snrm6; do
   test -f "$SCENARIO_ROOT/$required.npz" || { echo "Missing scenario $required" >&2; exit 1; }
 done
+actual_sample_count="$(python -c "import json; print(json.load(open('$SCENARIO_ROOT/scenarios.json'))['sample_count'])")"
+test "$actual_sample_count" -eq "$EXPECTED_SAMPLE_COUNT" || {
+  echo "Expected $EXPECTED_SAMPLE_COUNT records, found $actual_sample_count" >&2
+  exit 1
+}
 
 for model in "${MODELS[@]}"; do
   checkpoint="$TRAINING_ROOT/checkpoints/$model/seed_42/checkpoint.pth"
@@ -30,13 +36,13 @@ for model in "${MODELS[@]}"; do
   config="$CONFIG_ROOT/$model.yaml"
   cat > "$config" <<YAML
 run:
-  experiment_name: ${model}_standardized_smoke
+  experiment_name: ${model}_standardized_full_2198
   output_dir: ${OUTPUT_ROOT}/${model}_seed42
   seed: 42
   dataset_split: test
   overwrite: true
   history_file: ${history}
-  dataset_name: PTB-XL aligned smoke subset
+  dataset_name: PTB-XL fold-10 full aligned benchmark
   dataset_version: original-baseline-v1
 model:
   name: ${model}
@@ -66,7 +72,7 @@ data:
     - {name: denoised_snr6, condition: denoised, snr: 6, path: ${SCENARIO_ROOT}/denoised_snr6.npz}
     - {name: denoised_snr0, condition: denoised, snr: 0, path: ${SCENARIO_ROOT}/denoised_snr0.npz}
     - {name: denoised_snrm6, condition: denoised, snr: -6, path: ${SCENARIO_ROOT}/denoised_snrm6.npz}
-  batch_size: 256
+  batch_size: 64
   num_workers: 0
   input_channels: 12
   ecg_layout: NCT
@@ -83,7 +89,7 @@ analysis:
   metrics: true
   calibration: true
   robustness: true
-  bootstrap: 100
+  bootstrap: 1000
   calibration_bins: 10
   threshold:
     mode: load_from_file
