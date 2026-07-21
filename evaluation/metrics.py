@@ -439,14 +439,21 @@ class ThresholdManager:
         if suffix == ".json":
             with path.open("r", encoding="utf-8") as handle:
                 payload = json.load(handle)
-            if not isinstance(payload, dict) or not payload.get("source_split"):
+            if not isinstance(payload, dict):
+                raise ValueError("JSON threshold file must contain an object with provenance")
+            source_split = payload.get("source_split")
+            if not source_split and "validation" in str(payload.get("selected_on", "")).lower():
+                source_split = "validation"
+            if not source_split:
                 raise ValueError("JSON threshold file requires source_split provenance")
-            if str(payload.get("source_split", "")).lower() == "test":
+            if str(source_split).lower() == "test":
                 raise ValueError("threshold files selected or searched on the test split are not allowed")
-            if str(payload["source_split"]).lower() != self.source_split.lower():
+            if str(source_split).lower() != self.source_split.lower():
                 raise ValueError("threshold file source_split does not match configured provenance")
             if isinstance(payload, dict) and "thresholds" in payload:
                 payload = payload["thresholds"]
+            elif isinstance(payload, dict) and "per_class_thresholds" in payload:
+                payload = payload["per_class_thresholds"]
             if not isinstance(payload, (dict, list, tuple, float, int)):
                 raise ValueError("JSON threshold file must contain a number, list, mapping, or 'thresholds' field")
             return payload
