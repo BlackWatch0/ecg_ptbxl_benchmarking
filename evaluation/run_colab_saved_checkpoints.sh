@@ -6,6 +6,7 @@ SCENARIO_ROOT="${SCENARIO_ROOT:-/content/standard_evaluation_runtime/scenarios}"
 TRAINING_ROOT="${TRAINING_ROOT:-/content/drive/MyDrive/ECG/original_baseline_clean_noisy_denoised_v1/results}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-/content/drive/MyDrive/ECG/original_baseline_clean_noisy_denoised_v1/standardized_evaluation_smoke}"
 CONFIG_ROOT="${CONFIG_ROOT:-/content/standard_evaluation_runtime/evaluation_configs}"
+DEVICE="${DEVICE:-cuda}"
 if (( $# )); then
   MODELS=("$@")
 else
@@ -73,7 +74,7 @@ data:
   require_features: false
   validate_alignment: true
 inference:
-  device: cuda
+  device: ${DEVICE}
   warmup_batches: 1
   timing: both
   dtype: float32
