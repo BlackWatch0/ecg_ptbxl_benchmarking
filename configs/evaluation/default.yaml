@@ -1,0 +1,63 @@
+run:
+  experiment_name: example_xresnet_test
+  output_dir: ../../results/example_xresnet_test
+  seed: 42
+  dataset_split: test
+  overwrite: false
+  history_file: null
+  dataset_name: PTB-XL
+  dataset_version: "1.0.3"
+
+model:
+  name: xresnet1d101
+  adapter: original_model_factory
+  architecture: xresnet1d101
+  checkpoint: ../../checkpoints/best_model.pth
+  checkpoint_key: null
+  strip_prefixes: []
+  strict_checkpoint: true
+  num_classes: 5
+  input_channels: 12
+  activation: sigmoid
+  call_mode: single
+  input_key: ecg
+  kwargs: {}
+
+data:
+  # Each NPZ contains labels, sample_id and ECG and/or features. ECG uses NCT
+  # unless ecg_layout is NTC. Conditions must share sample_id order and labels.
+  scenarios:
+    - {name: clean, condition: clean, snr: null, path: ../../data/evaluation/clean.npz}
+    - {name: noisy_24, condition: noisy, snr: 24, path: ../../data/evaluation/noisy_24.npz}
+    - {name: denoised_24, condition: denoised, snr: 24, path: ../../data/evaluation/denoised_24.npz}
+  batch_size: 256
+  num_workers: 0
+  input_channels: 12
+  ecg_layout: NCT
+  require_ecg: true
+  require_features: false
+  validate_alignment: true
+
+inference:
+  device: cuda
+  warmup_batches: 1
+  timing: both
+  dtype: float32
+
+analysis:
+  class_names: [NORM, MI, STTC, CD, HYP]
+  metrics: true
+  calibration: true
+  robustness: true
+  bootstrap: 1000
+  calibration_bins: 10
+  threshold:
+    mode: fixed_global
+    global_threshold: 0.5
+    source_split: validation
+
+output:
+  save_predictions: true
+  save_logits: true
+  save_plots: true
+  measure_efficiency: true

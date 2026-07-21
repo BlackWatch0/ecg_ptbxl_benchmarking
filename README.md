@@ -104,6 +104,19 @@ python test_evaluate_exp0.py
 | `docs/emd_features.md` | EMD 特征文件、公共列、排序和标签对齐说明 |
 | `docs/cbam_emd_late_fusion.md` | CBAM-xResNet1D EMD late-fusion 训练说明 |
 | `docs/colab.md` | Colab 数据下载、校验与训练入口 |
+| `model_architecture_summary.md` | 当前可训练/可配置模型、输入输出、主干、注意力、特征分支、融合、训练入口与静态风险总览 |
+| `model_architecture_summary.json` | 与架构总览对应的机器可读模型清单 |
+| `evaluation/evaluate.py` | 与训练解耦的统一模型评估入口，支持 ECG/feature/late-fusion、鲁棒性、校准、bootstrap 和标准报告 |
+| `evaluation/compare_experiments.py` | 跨模型、跨 seed 的标准结果比较 |
+| `evaluation/convert_legacy_results.py` | 将旧评估 CSV 转换为标准格式，无法恢复的字段明确标记 missing |
+
+## 模型架构清单维护
+
+`model_architecture_summary.md` 和 `model_architecture_summary.json` 是当前实现模型的人工分析与机器可读索引。新增模型、可训练变体、builder/factory 注册项、特征分支或融合方式，或实质修改现有模型架构时，必须同步更新这两个文件。报告应记录定义与训练入口、配置、张量 shape、主干/attention/feature branch/fusion/classifier、可验证的参数量或失败原因，以及静态风险；不得仅根据文件名推测模型存在。
+
+## 统一模型评估
+
+新模型评估统一通过 [`evaluation/README.md`](evaluation/README.md) 所述入口完成。测试阶段不会训练模型或搜索 test threshold；所有模型使用相同的多标签指标、逐类 schema、sample ID 对齐、校准、bootstrap、效率统计和输出目录契约。示例配置位于 `configs/evaluation/default.yaml`。
 
 ## 混合噪声 SNR 评估（v0.1.0）
 

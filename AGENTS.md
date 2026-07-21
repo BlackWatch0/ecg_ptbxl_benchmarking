@@ -230,6 +230,10 @@ ZIP 包含 `final_report/`、`metrics/`、`predictions/`、`training_logs/` 和 
 1. 在 `code/models/` 中创建 `your_new_model.py`，实现 `fit()` 和 `predict()`
 2. 在 `code/configs/your_new_configs.py` 中定义配置
 3. 在 `code/experiments/scp_experiment.py` 的 `perform()` 中添加 `elif modeltype == "your_type":`
+4. **同步更新根目录的 `model_architecture_summary.md` 和 `model_architecture_summary.json`。** 该要求适用于新增模型、可训练配置变体、factory/registry builder 注册项、attention、feature branch、fusion 或 classifier 的实质变更。
+5. 架构报告必须基于实际构造函数、配置和训练入口追踪；记录模型定义/训练文件、输入输出 shape、主干、attention、特征分支、fusion、分类头、训练配置、参数量或无法实例化原因、以及静态风险。不要仅按文件名登记模型。
+6. 如环境允许，使用随机小张量做一次不加载数据、不训练的 dummy `forward`；否则在报告中写明完整失败摘要。同步更新 Markdown 的人工说明和 JSON 的机器可读条目。
+7. 为新模型提供 `evaluation/model_registry.py` 可使用的 factory 或 adapter，并通过统一 `evaluation/evaluate.py` 验证 CPU 单输入/feature-only/late-fusion 调用、严格 checkpoint 加载、输出类别数和标准结果 schema。不要为新模型另写一套不兼容的指标或测试目录。
 
 ## 测试
 
