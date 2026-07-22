@@ -1,6 +1,7 @@
 """Direct PyTorch factory for the original raw-waveform benchmark models."""
 
 from models.basic_conv1d import fcn_wang, weight_init
+from models.cbam_xresnet1d import build_model
 from models.inception1d import inception1d
 from models.resnet1d import resnet1d_wang
 from models.rnn1d import RNN1d
@@ -17,6 +18,7 @@ MODEL_NAMES = (
 )
 
 WAVELET_MODEL_NAME = 'wavelet_nn'
+SE_MODEL_NAME = 'se_xresnet1d101'
 BENCHMARK_MODEL_NAMES = MODEL_NAMES + (WAVELET_MODEL_NAME,)
 
 ALIASES = {
@@ -54,6 +56,9 @@ def build_original_model(name, num_classes=5, input_channels=12):
                   ps_head=0.5, lin_ftrs_head=[128])
     if name == 'xresnet1d101':
         model = xresnet1d101(kernel_size=5, **common)
+    elif name == SE_MODEL_NAME:
+        model = build_model('xresnet1d101', num_classes, input_channels=input_channels,
+                            use_se=True, use_emd=False)
     elif name == 'resnet1d_wang':
         model = resnet1d_wang(kernel_size=5, **common)
     elif name == 'lstm':

@@ -1,0 +1,58 @@
+task: superdiagnostic
+num_classes: 5
+class_names: [NORM, MI, STTC, CD, HYP]
+epochs: 50
+batch_size: 128
+learning_rate: 0.01
+weight_decay: 0.01
+optimizer: Adam
+scheduler: OneCycleLR
+loss: BCEWithLogitsLoss
+monitor: valid_loss
+monitor_mode: min
+early_stopping_patience: 8
+save_best_only: true
+threshold_search: true
+seeds: [42]
+mixed_precision: true
+allow_clean_feature_upper_bound_fallback: false
+wavelet_transform:
+  log1p_energy: false
+data_sources:
+  strategy: mounted_then_optional_fetch
+  mount_drive: true
+  fetch_if_mounted_missing: false
+  copy_archives_to_runtime: true
+  strict_validation: true
+  ptbxl_clean:
+    mounted_archive: /content/drive/MyDrive/ECG_Project/data/ptbxl/ptbxl_records100.tar.gz
+    fetch_url: ''
+    runtime_archive: /content/data_archives/ptbxl_records100.tar.gz
+    extract_dir: /content/data/ptbxl_clean
+    archive_type: tar.gz
+  wavelet:
+    mounted_archive: /content/drive/MyDrive/ECG_Project/data/wavelet/Wavelet_Features_Complete.zip
+    fetch_url: ''
+    runtime_archive: /content/data_archives/Wavelet_Features_Complete.zip
+    extract_dir: /content/data/wavelet_features
+    archive_type: zip
+  mixed_noisy_ecg:
+    mounted_archive: /content/drive/MyDrive/ECG_Project/data/noisy/ptbxl_original_database_plus_mixed_WFDB.tar
+    fetch_url: ''
+    runtime_archive: /content/data_archives/mixed_noisy_ecg.tar
+    extract_dir: /content/data/ecg_mixed_noisy
+    archive_type: tar
+  denoised_ecg:
+    mounted_archive: /content/drive/MyDrive/ECG_Project/data/denoised/denoised_WFDB.tar
+    fetch_url: ''
+    runtime_archive: /content/data_archives/denoised_ecg.tar
+    extract_dir: /content/data/ecg_denoised
+    archive_type: tar
+runtime_paths:
+  wavelet_cache: /content/cache/wavelet
+output_dir: /content/drive/MyDrive/ECG_Project/results/ablation_wavelet/
+experiments:
+  - xresnet1d101_baseline
+  - cbam_xresnet1d101
+  - xresnet1d101_wavelet_late_fusion
+  - cbam_xresnet1d101_wavelet_late_fusion

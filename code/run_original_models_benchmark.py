@@ -7,6 +7,7 @@ import json
 import os
 import pickle
 import random
+import tempfile
 import time
 import traceback
 from pathlib import Path
@@ -17,12 +18,12 @@ import torch
 import wfdb
 from sklearn.metrics import (average_precision_score, f1_score, precision_score,
                              recall_score, roc_auc_score)
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import MultiLabelBinarizer, StandardScaler
 from torch.utils.data import DataLoader, Dataset
 
 from models.original_model_factory import (BENCHMARK_MODEL_NAMES, MODEL_NAMES,
-                                           WAVELET_MODEL_NAME,
-                                           build_original_model,
+                                            SE_MODEL_NAME, WAVELET_MODEL_NAME,
+                                            build_original_model,
                                            build_wavelet_nn,
                                            canonical_model_name,
                                            default_learning_rate)
@@ -178,6 +179,60 @@ def load_clean_data(data_root, output_root):
     return splits
 
 
+def load_official_raw_data(data_root, output_root, cache_dir=None):
+    official_root = data_root / 'ptbxl'
+    required = ['ptbxl_database.csv', 'scp_statements.csv', 'records100']
+    missing = [name for name in required if not (official_root / name).exists()]
+    if missing:
+        raise FileNotFoundError('Official PTB-XL data is missing {} under {}'.format(
+            missing, official_root))
+
+    metadata = pd.read_csv(official_root / 'ptbxl_database.csv', index_col='ecg_id')
+    metadata.scp_codes = metadata.scp_codes.apply(ast.literal_eval)
+    cache_path = None
+    if cache_dir:
+        cache_path = Path(cache_dir).expanduser().resolve() / 'official_ptbxl_records100.npz'
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+    if cache_path and cache_path.exists():
+        with np.load(cache_path, allow_pickle=False) as cached:
+            raw = cached['raw']
+            cached_ids = cached['ecg_ids']
+        if not np.array_equal(cached_ids, metadata.index.to_numpy()) or raw.shape != (len(metadata), 1000, 12):
+            raise ValueError('Stale or misaligned official PTB-XL cache: {}'.format(cache_path))
+    else:
+        raw = np.asarray([wfdb.rdsamp(str(official_root / filename))[0]
+                          for filename in metadata.filename_lr])
+        if raw.shape != (len(metadata), 1000, 12):
+            raise ValueError('Expected official records100 shape ({}, 1000, 12), got {}'.format(
+                len(metadata), raw.shape))
+        if cache_path:
+            temporary = cache_path.with_suffix('.npz.tmp')
+            with open(temporary, 'wb') as file:
+                np.savez_compressed(file, raw=raw, ecg_ids=metadata.index.to_numpy())
+            os.replace(str(temporary), str(cache_path))
+
+    labels = utils.compute_label_aggregations(metadata, str(official_root) + '/',
+                                               'superdiagnostic')
+    raw, labels, targets, mlb = utils.select_data(
+        raw, labels, 'superdiagnostic', 0, str(output_root / 'config') + '/',
+        class_order=CLASS_NAMES)
+    if targets.shape[1] != 5 or mlb.classes_.tolist() != CLASS_NAMES:
+        raise ValueError('Expected five classes in order {}, got {}'.format(
+            CLASS_NAMES, mlb.classes_.tolist()))
+    fold = labels.strat_fold.to_numpy()
+    masks = {'train': fold <= 8, 'val': fold == 9, 'test': fold == 10}
+    ids = labels.index.to_numpy()
+    splits = {
+        name: {'ids': ids[mask], 'ecg': raw[mask],
+               'labels': targets[mask].astype(np.float32)}
+        for name, mask in masks.items()
+    }
+    splits['train']['ecg'], splits['val']['ecg'], splits['test']['ecg'] = \
+        utils.preprocess_signals(splits['train']['ecg'], splits['val']['ecg'],
+                                 splits['test']['ecg'], str(output_root / 'config') + '/')
+    return splits
+
+
 def _path_column(manifest):
     for column in ('wfdb_record_relative', 'record_path', 'path', 'waveform_path', 'file'):
         if column in manifest.columns:
@@ -314,11 +369,88 @@ def smoke_test_data_config(args, output_root, device):
     print('Smoke test passed for six raw-waveform models and Wavelet+NN.')
 
 
-def build_loader(split, training, batch_size, shuffle=None):
-    dataset = CropDataset(split['ecg'], split['labels'], training=training)
+def build_loader(split, training, batch_size, shuffle=None, crop_length=CROP_LENGTH,
+                 num_workers=0):
+    dataset = CropDataset(split['ecg'], split['labels'], training=training,
+                          crop_length=crop_length)
     return DataLoader(dataset, batch_size=batch_size,
                       shuffle=training if shuffle is None else shuffle,
-                      num_workers=0, pin_memory=torch.cuda.is_available())
+                      num_workers=num_workers, pin_memory=torch.cuda.is_available())
+
+
+def run_one_batch_smoke_test(args, data_root, device):
+    official_root = data_root / 'ptbxl'
+    required = ['ptbxl_database.csv', 'scp_statements.csv', 'records100']
+    missing = [name for name in required if not (official_root / name).exists()]
+    if missing:
+        raise FileNotFoundError('Official PTB-XL data is missing {} under {}'.format(
+            missing, official_root))
+    if len(args.models) != 1:
+        raise ValueError('--one-batch-smoke-test requires exactly one model')
+
+    model_name = canonical_model_name(args.models[0])
+    if model_name != SE_MODEL_NAME:
+        raise ValueError('--one-batch-smoke-test requires {}'.format(SE_MODEL_NAME))
+
+    metadata = pd.read_csv(official_root / 'ptbxl_database.csv', index_col='ecg_id')
+    metadata.scp_codes = metadata.scp_codes.apply(ast.literal_eval)
+    labels = utils.compute_label_aggregations(metadata, str(official_root) + '/',
+                                               'superdiagnostic')
+    labels = labels[labels.superdiagnostic_len > 0]
+    train_labels = labels[labels.strat_fold <= 8].head(args.batch_size)
+    if len(train_labels) != args.batch_size:
+        raise ValueError('Need {} labeled training records, found {}'.format(
+            args.batch_size, len(train_labels)))
+
+    mlb = MultiLabelBinarizer(classes=CLASS_NAMES)
+    mlb.fit([CLASS_NAMES])
+    targets = mlb.transform(train_labels.superdiagnostic).astype(np.float32)
+    waveforms = np.asarray([
+        wfdb.rdsamp(str(official_root / filename))[0]
+        for filename in train_labels.filename_lr
+    ])
+    if waveforms.shape[1:] != (1000, 12):
+        raise ValueError('Expected records100 waveforms shaped [N, 1000, 12], got {}'.format(
+            waveforms.shape))
+    if not np.isfinite(waveforms).all():
+        raise FloatingPointError('Official PTB-XL batch contains NaN or Inf')
+
+    with tempfile.TemporaryDirectory() as temporary:
+        standardized, _, _ = utils.preprocess_signals(waveforms, [], [], temporary + os.sep)
+    split = {'ecg': standardized, 'labels': targets}
+    loader = build_loader(split, True, args.batch_size, shuffle=False, crop_length=1000)
+    ecg, target, _ = next(iter(loader))
+    ecg, target = ecg.to(device), target.to(device)
+
+    model = build_original_model(model_name).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=default_learning_rate(model_name),
+                                 weight_decay=1e-2)
+    criterion = torch.nn.BCEWithLogitsLoss()
+    optimizer.zero_grad(set_to_none=True)
+    logits = model(ecg)
+    loss = criterion(logits, target)
+    if not torch.isfinite(loss):
+        raise FloatingPointError('One-batch smoke test produced a non-finite loss')
+    parameter_before = next(model.parameters()).detach().clone()
+    loss.backward()
+    backward_success = any(parameter.grad is not None for parameter in model.parameters())
+    optimizer.step()
+    optimizer_step_success = not torch.equal(parameter_before, next(model.parameters()).detach())
+
+    result = {
+        'data_root': str(official_root), 'model_name': model_name,
+        'loss_type': 'BCEWithLogitsLoss', 'input_shape': list(ecg.shape),
+        'label_shape': list(target.shape), 'output_shape': list(logits.shape),
+        'label_names': CLASS_NAMES, 'multi_hot_labels': target.detach().cpu().tolist(),
+        'loss': float(loss.detach().cpu()), 'backward_success': backward_success,
+        'optimizer_step_success': optimizer_step_success,
+        'contains_nan': bool(torch.isnan(ecg).any()),
+        'contains_inf': bool(torch.isinf(ecg).any()), 'device': str(device),
+    }
+    if device.type == 'cuda':
+        result['gpu_name'] = torch.cuda.get_device_name(device)
+        result['gpu_peak_allocated_mib'] = round(torch.cuda.max_memory_allocated(device) / 1024 ** 2, 2)
+    print(json.dumps(result, indent=2))
 
 
 def _autocast(device, enabled):
@@ -403,7 +535,7 @@ def train_model(model, train_loader, valid_loader, config, device, best_path,
     for epoch in range(start_epoch, config['epochs']):
         model.train()
         train_losses = []
-        for ecg, labels, _ in train_loader:
+        for batch_index, (ecg, labels, _) in enumerate(train_loader, start=1):
             ecg, labels = ecg.to(device), labels.to(device)
             optimizer.zero_grad(set_to_none=True)
             with _autocast(device, amp):
@@ -411,6 +543,8 @@ def train_model(model, train_loader, valid_loader, config, device, best_path,
                 loss = criterion(logits, labels)
             if not torch.isfinite(loss):
                 raise FloatingPointError('Non-finite training loss at epoch {}'.format(epoch + 1))
+            if loss.detach().item() > 100:
+                raise FloatingPointError('Abnormally large training loss at epoch {}'.format(epoch + 1))
             if scaler is not None:
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
@@ -425,8 +559,17 @@ def train_model(model, train_loader, valid_loader, config, device, best_path,
                 optimizer.step()
             scheduler.step()
             train_losses.append(float(loss.detach().cpu()))
+            if batch_index % 100 == 0:
+                message = '{} epoch {}/{} batch {}/{} mean_loss={:.6f}'.format(
+                    config['model_name'], epoch + 1, config['epochs'], batch_index,
+                    len(train_loader), np.mean(train_losses))
+                if device.type == 'cuda':
+                    message += ' gpu_peak_mib={:.2f}'.format(
+                        torch.cuda.max_memory_allocated(device) / 1024 ** 2)
+                print(message)
         model.eval()
         valid_losses = []
+        print('{} validation start'.format(config['model_name']))
         with torch.no_grad():
             for ecg, labels, _ in valid_loader:
                 logits = model(ecg.to(device))
@@ -434,6 +577,7 @@ def train_model(model, train_loader, valid_loader, config, device, best_path,
                 if not torch.isfinite(loss):
                     raise FloatingPointError('Non-finite validation loss at epoch {}'.format(epoch + 1))
                 valid_losses.append(float(loss.cpu()))
+        print('{} validation complete'.format(config['model_name']))
         valid_loss = float(np.mean(valid_losses))
         train_loss = float(np.mean(train_losses))
         history.append({'epoch': epoch + 1, 'train_loss': train_loss,
@@ -764,7 +908,10 @@ def run_one(model_name, seed, splits, scenarios, config, output_root, device, ar
     training_seconds = None
     if not args.evaluate_only:
         trained = False
-        candidates = [config['batch_size'], 128, 64, 32, 16]
+        if config['crop_length'] == 1000:
+            candidates = [config['batch_size'], 16, 8]
+        else:
+            candidates = [config['batch_size'], 128, 64, 32, 16]
         if args.resume and last_path.exists():
             previous = load_torch_checkpoint(last_path, torch.device('cpu'))
             previous_batch = previous.get('config', {}).get('actual_batch_size')
@@ -775,10 +922,14 @@ def run_one(model_name, seed, splits, scenarios, config, output_root, device, ar
                 continue
             model = build_original_model(model_name).to(device)
             try:
-                train_loader = build_loader(splits['train'], True, candidate)
-                valid_loader = build_loader(splits['val'], False, candidate)
+                train_loader = build_loader(
+                    splits['train'], True, candidate, crop_length=config['crop_length'],
+                    num_workers=args.num_workers)
+                valid_loader = build_loader(
+                    splits['val'], False, candidate, crop_length=config['crop_length'],
+                    num_workers=args.num_workers)
                 run_config = dict(config, model_name=model_name,
-                                  learning_rate=default_learning_rate(model_name),
+                                  learning_rate=args.learning_rate or default_learning_rate(model_name),
                                   actual_batch_size=candidate, seed=seed)
                 best_epoch, best_loss, training_seconds = train_model(
                     model, train_loader, valid_loader, run_config, device,
@@ -787,7 +938,7 @@ def run_one(model_name, seed, splits, scenarios, config, output_root, device, ar
                 actual_batch_size, trained = candidate, True
                 break
             except RuntimeError as error:
-                if 'out of memory' not in str(error).lower() or candidate == 16:
+                if 'out of memory' not in str(error).lower() or candidate == min(candidates):
                     raise
                 print('CUDA OOM for {} at batch {}; retrying smaller.'.format(model_name, candidate))
                 del model
@@ -808,8 +959,26 @@ def run_one(model_name, seed, splits, scenarios, config, output_root, device, ar
         training_seconds = last_state.get('training_time_seconds', training_seconds)
         actual_batch_size = last_state.get('config', {}).get('actual_batch_size', actual_batch_size)
     parameter_count, trainable_count = count_parameters(model)
-    val_loader = build_loader(splits['val'], False, actual_batch_size)
+    val_loader = build_loader(
+        splits['val'], False, actual_batch_size, crop_length=config['crop_length'],
+        num_workers=args.num_workers)
     val_prob, val_y, _ = predict_crops(model, val_loader, device, len(splits['val']['ids']))
+    val_prediction = (val_prob >= .5).astype(int)
+    val_roc = [_safe_metric(roc_auc_score, val_y[:, index], val_prob[:, index])
+               for index in range(len(CLASS_NAMES))]
+    val_f1 = [float(f1_score(val_y[:, index], val_prediction[:, index], zero_division=0))
+              for index in range(len(CLASS_NAMES))]
+    validation_metrics = {
+        'threshold': .5,
+        'loss': best_loss,
+        'macro_roc_auc': float(np.nanmean(val_roc)),
+        'macro_f1': float(f1_score(val_y, val_prediction, average='macro', zero_division=0)),
+        'per_class': {name: {'roc_auc': val_roc[index], 'f1': val_f1[index]}
+                      for index, name in enumerate(CLASS_NAMES)},
+    }
+    json_dump(metric_dir / 'seed_{}_validation_metrics.json'.format(seed), validation_metrics)
+    save_predictions(prediction_dir / 'validation_predictions_threshold_0_5.csv',
+                     splits['val']['ids'], val_y, val_prob, val_prediction)
     global_threshold, per_class_thresholds, curve = threshold_results(val_y, val_prob)
     json_dump(checkpoint_dir / 'thresholds.json', {
         'threshold_0.5': .5, 'best_global_threshold': global_threshold,
@@ -818,6 +987,8 @@ def run_one(model_name, seed, splits, scenarios, config, output_root, device, ar
     })
     pd.DataFrame(curve, columns=['threshold', 'validation_macro_f1']).to_csv(
         metric_dir / 'seed_{}_threshold_search.csv'.format(seed), index=False)
+    if args.skip_test_evaluation:
+        return
     per_class_array = np.array([per_class_thresholds[name] for name in CLASS_NAMES])
     save_predictions(prediction_dir / 'validation_predictions.csv', splits['val']['ids'],
                      val_y, val_prob, (val_prob >= per_class_array).astype(int))
@@ -830,7 +1001,9 @@ def run_one(model_name, seed, splits, scenarios, config, output_root, device, ar
     all_overall, all_per_class = [], []
     for scenario, snr, ecg, integrity in all_scenarios:
         split = {'ids': splits['test']['ids'], 'labels': splits['test']['labels'], 'ecg': ecg}
-        loader = build_loader(split, False, actual_batch_size)
+        loader = build_loader(
+            split, False, actual_batch_size, crop_length=config['crop_length'],
+            num_workers=args.num_workers)
         probabilities, y_test, inference_ms = predict_crops(model, loader, device, len(split['ids']))
         json_dump(metric_dir / 'seed_{}_{}_integrity.json'.format(seed, scenario), integrity)
         strategies = [('threshold_0.5', .5),
@@ -888,10 +1061,17 @@ def parse_args(argv=None):
     parser.add_argument('--seeds', nargs='+', type=int, default=[42])
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--batch-size', type=int, default=128)
+    parser.add_argument('--learning-rate', type=float)
+    parser.add_argument('--crop-length', type=int, default=CROP_LENGTH)
+    parser.add_argument('--num-workers', type=int, default=0)
     parser.add_argument('--device', default=None)
+    parser.add_argument('--official-raw-data', action='store_true')
+    parser.add_argument('--cache-dir')
+    parser.add_argument('--skip-test-evaluation', action='store_true')
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--evaluate-only', action='store_true')
     parser.add_argument('--smoke-test', action='store_true')
+    parser.add_argument('--one-batch-smoke-test', action='store_true')
     parser.add_argument('--no-mixed-precision', action='store_true')
     parser.add_argument('--noisy-manifest')
     parser.add_argument('--noisy-root')
@@ -905,6 +1085,18 @@ def main(argv=None):
     apply_data_config(args)
     output_root = Path(args.output_dir).expanduser().resolve()
     data_root = Path(args.data_root).expanduser().resolve()
+    if args.smoke_test and args.one_batch_smoke_test:
+        raise ValueError('--smoke-test and --one-batch-smoke-test cannot be combined')
+    if args.crop_length < 1:
+        raise ValueError('--crop-length must be positive')
+    unknown = [name for name in args.models
+               if canonical_model_name(name) not in BENCHMARK_MODEL_NAMES + (SE_MODEL_NAME,)]
+    if unknown:
+        raise ValueError('Unknown models: {}'.format(unknown))
+    device = torch.device(args.device or ('cuda' if torch.cuda.is_available() else 'cpu'))
+    if args.one_batch_smoke_test:
+        run_one_batch_smoke_test(args, data_root, device)
+        return
     prepare_directories(output_root)
     config = {
         'task': 'superdiagnostic', 'class_names': CLASS_NAMES,
@@ -912,7 +1104,7 @@ def main(argv=None):
         'epochs': args.epochs, 'batch_size': args.batch_size,
         'weight_decay': 1e-2, 'optimizer': 'Adam', 'scheduler': 'OneCycleLR',
         'loss': 'BCEWithLogitsLoss', 'mixed_precision': not args.no_mixed_precision,
-        'crop_length': CROP_LENGTH, 'validation_test_stride': CROP_STRIDE,
+        'crop_length': args.crop_length, 'validation_test_stride': CROP_STRIDE,
         'crop_aggregation': 'max_probability', 'models': args.models, 'seeds': args.seeds,
         'wavelet_nn': {
             'wavelet': 'db6', 'decomposition_level': 5,
@@ -928,19 +1120,17 @@ def main(argv=None):
     obsolete_status = output_root / 'config' / 'wavelet_nn_status.json'
     if obsolete_status.exists():
         obsolete_status.unlink()
-    unknown = [name for name in args.models
-               if canonical_model_name(name) not in BENCHMARK_MODEL_NAMES]
-    if unknown:
-        raise ValueError('Unknown models: {}'.format(unknown))
-    device = torch.device(args.device or ('cuda' if torch.cuda.is_available() else 'cpu'))
     print('Device: {}, output: {}'.format(device, output_root))
     if args.smoke_test:
         smoke_test_data_config(args, output_root, device)
         return
-    splits = load_clean_data(data_root, output_root)
+    if args.official_raw_data:
+        splits = load_official_raw_data(data_root, output_root, args.cache_dir)
+    else:
+        splits = load_clean_data(data_root, output_root)
     with open(output_root / 'config' / 'standard_scaler.pkl', 'rb') as file:
         scaler = pickle.load(file)
-    scenarios = external_scenarios(args, splits['test'], scaler)
+    scenarios = [] if args.skip_test_evaluation else external_scenarios(args, splits['test'], scaler)
     completed = {}
     failures = []
     for seed in args.seeds:
