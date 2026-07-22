@@ -26,6 +26,22 @@ test "$actual_sample_count" -eq "$EXPECTED_SAMPLE_COUNT" || {
   echo "Expected $EXPECTED_SAMPLE_COUNT records, found $actual_sample_count" >&2
   exit 1
 }
+for model in "${MODELS[@]}"; do
+  checkpoint="$TRAINING_ROOT/checkpoints/$model/seed_42/checkpoint.pth"
+  if [[ "$model" == wavelet_nn ]]; then
+    checkpoint="$TRAINING_ROOT/checkpoints/$model/seed_42/best_loss_model.keras"
+    feature_count="$(python -c "import json; print(json.load(open('$SCENARIO_ROOT/scenarios.json')).get('wavelet_features', {}).get('feature_count', -1))")"
+    test "$feature_count" -eq 864 || {
+      echo "Wavelet+NN requires 864 scaled features in every scenario NPZ" >&2
+      exit 1
+    }
+  fi
+  test -f "$checkpoint" || { echo "Missing checkpoint: $checkpoint" >&2; exit 1; }
+  test -f "$TRAINING_ROOT/checkpoints/$model/seed_42/thresholds.json" || {
+    echo "Missing threshold file for $model" >&2
+    exit 1
+  }
+done
 
 for model in "${MODELS[@]}"; do
   adapter=original_model_factory
