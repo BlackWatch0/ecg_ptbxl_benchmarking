@@ -11,7 +11,7 @@ EXPECTED_SAMPLE_COUNT="${EXPECTED_SAMPLE_COUNT:-2198}"
 if (( $# )); then
   MODELS=("$@")
 else
-  MODELS=(xresnet1d101 resnet1d_wang fcn_wang)
+  MODELS=(xresnet1d101 resnet1d_wang fcn_wang inception1d lstm lstm_bidir wavelet_nn)
 fi
 
 mkdir -p "$OUTPUT_ROOT" "$CONFIG_ROOT"
@@ -28,7 +28,26 @@ test "$actual_sample_count" -eq "$EXPECTED_SAMPLE_COUNT" || {
 }
 
 for model in "${MODELS[@]}"; do
+  adapter=original_model_factory
   checkpoint="$TRAINING_ROOT/checkpoints/$model/seed_42/checkpoint.pth"
+  activation=sigmoid
+  call_mode=single
+  input_key=ecg
+  require_ecg=true
+  require_features=false
+  feature_shape='[]'
+  crop_config=$'  crop_length: 250\n  crop_stride: 125\n  crop_aggregation: max'
+  if [[ "$model" == wavelet_nn ]]; then
+    adapter=wavelet_keras
+    checkpoint="$TRAINING_ROOT/checkpoints/$model/seed_42/best_loss_model.keras"
+    activation=identity
+    call_mode=feature_only
+    input_key=features
+    require_ecg=false
+    require_features=true
+    feature_shape='[864]'
+    crop_config=''
+  fi
   threshold="$TRAINING_ROOT/checkpoints/$model/seed_42/thresholds.json"
   history="$TRAINING_ROOT/training_logs/$model/seed_42.csv"
   test -f "$checkpoint" || { echo "Missing checkpoint: $checkpoint" >&2; exit 1; }
@@ -46,19 +65,17 @@ run:
   dataset_version: original-baseline-v1
 model:
   name: ${model}
-  adapter: original_model_factory
+  adapter: ${adapter}
   architecture: ${model}
   checkpoint: ${checkpoint}
   strict_checkpoint: true
   trusted_legacy_checkpoint: false
   num_classes: 5
   input_channels: 12
-  activation: sigmoid
-  call_mode: single
-  input_key: ecg
-  crop_length: 250
-  crop_stride: 125
-  crop_aggregation: max
+  activation: ${activation}
+  call_mode: ${call_mode}
+  input_key: ${input_key}
+${crop_config}
 data:
   scenarios:
     - {name: clean, condition: clean, path: ${SCENARIO_ROOT}/clean.npz}
@@ -76,8 +93,9 @@ data:
   num_workers: 0
   input_channels: 12
   ecg_layout: NCT
-  require_ecg: true
-  require_features: false
+  require_ecg: ${require_ecg}
+  require_features: ${require_features}
+  expected_feature_shape: ${feature_shape}
   validate_alignment: true
 inference:
   device: ${DEVICE}

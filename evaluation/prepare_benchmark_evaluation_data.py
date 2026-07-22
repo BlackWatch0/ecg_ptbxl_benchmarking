@@ -4,8 +4,9 @@ from __future__ import annotations
 import argparse
 import json
 import pickle
+import sys
 from pathlib import Path
-from typing import Dict, List, Sequence
+from typing import Callable, Dict, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -32,7 +33,10 @@ def _standardize(records: Sequence[np.ndarray], scaler: object) -> np.ndarray:
 
 
 def prepare(data_config: Path, labels_csv: Path, scaler_path: Path,
-            output_dir: Path, sample_count: int, snr_list: Sequence[int]) -> Dict[str, str]:
+            output_dir: Path, sample_count: int, snr_list: Sequence[int],
+            wavelet_scaler_path: Optional[Path] = None,
+            wavelet_extractor: Optional[Callable[[np.ndarray], np.ndarray]] = None
+            ) -> Dict[str, str]:
     """Create ID-aligned clean/noisy/denoised scenario NPZ files."""
     config = json.loads(data_config.read_text(encoding="utf-8"))
     manifests = {name: Path(path) for name, path in config["manifests"].items()}
@@ -52,16 +56,40 @@ def prepare(data_config: Path, labels_csv: Path, scaler_path: Path,
     labels = labels_frame.loc[sample_ids, label_columns].to_numpy(dtype=np.float32)
     with scaler_path.open("rb") as handle:
         scaler = pickle.load(handle)
+    if int(getattr(scaler, "n_features_in_", -1)) != 1:
+        raise ValueError("ECG scaler must be the train-only single-feature standardizer")
+    wavelet_scaler = None
+    if wavelet_scaler_path is not None:
+        with wavelet_scaler_path.open("rb") as handle:
+            wavelet_scaler = pickle.load(handle)
+        if int(getattr(wavelet_scaler, "n_features_in_", -1)) != 864:
+            raise ValueError("Wavelet scaler must expect exactly 864 features")
+        if wavelet_extractor is None:
+            code_root = Path(__file__).resolve().parents[1] / "code"
+            sys.path.insert(0, str(code_root))
+            from models.wavelet import get_ecg_features
+            wavelet_extractor = get_ecg_features
     output_dir.mkdir(parents=True, exist_ok=True)
     outputs: Dict[str, str] = {}
 
     def save(name: str, condition: str, snr: float, rows: pd.DataFrame) -> None:
         rows = rows.set_index("ecg_id").loc[sample_ids]
         waveforms = _standardize([_read_waveform(path) for path in rows.record_path], scaler)
+        arrays = {
+            "ecg": np.transpose(waveforms, (0, 2, 1)), "labels": labels,
+            "sample_id": sample_ids, "condition": np.asarray(condition),
+            "snr": np.asarray(snr), "class_names": np.asarray(DEFAULT_CLASSES),
+        }
+        if wavelet_scaler is not None and wavelet_extractor is not None:
+            features = np.asarray(wavelet_extractor(waveforms), dtype=np.float32)
+            if features.shape != (len(sample_ids), 864) or not np.isfinite(features).all():
+                raise ValueError("Invalid wavelet features for {}: {}".format(name, features.shape))
+            scaled_features = wavelet_scaler.transform(features).astype(np.float32)
+            if not np.isfinite(scaled_features).all():
+                raise ValueError("Scaled wavelet features are non-finite for {}".format(name))
+            arrays["features"] = scaled_features
         path = output_dir / (name + ".npz")
-        np.savez_compressed(path, ecg=np.transpose(waveforms, (0, 2, 1)), labels=labels,
-                            sample_id=sample_ids, condition=np.asarray(condition),
-                            snr=np.asarray(snr), class_names=np.asarray(DEFAULT_CLASSES))
+        np.savez_compressed(path, **arrays)
         outputs[name] = str(path.resolve())
         print("Prepared {}: records={}, shape={}".format(name, len(rows), tuple(waveforms.shape)))
 
@@ -75,8 +103,12 @@ def prepare(data_config: Path, labels_csv: Path, scaler_path: Path,
             label = "m{}".format(abs(snr)) if snr < 0 else str(snr)
             save("{}_snr{}".format(condition, label), condition, snr, rows)
     manifest = output_dir / "scenarios.json"
-    manifest.write_text(json.dumps({"class_names": DEFAULT_CLASSES, "sample_count": sample_count,
-                                    "scenarios": outputs}, indent=2) + "\n", encoding="utf-8")
+    manifest_payload = {"class_names": DEFAULT_CLASSES, "sample_count": sample_count,
+                        "scenarios": outputs}
+    if wavelet_scaler_path is not None:
+        manifest_payload["wavelet_features"] = {
+            "feature_count": 864, "scaler": str(wavelet_scaler_path.resolve())}
+    manifest.write_text(json.dumps(manifest_payload, indent=2) + "\n", encoding="utf-8")
     return outputs
 
 
@@ -88,11 +120,13 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--sample-count", type=int, default=64)
     parser.add_argument("--snr-list", nargs="+", type=int, default=[24, 12, 6, 0, -6])
+    parser.add_argument("--wavelet-scaler", type=Path,
+                        help="Train-only 864-feature scaler; enables Wavelet+NN features")
     args = parser.parse_args()
     if args.sample_count < 1:
         raise ValueError("sample-count must be positive")
     prepare(args.data_config, args.labels_csv, args.scaler, args.output_dir,
-            args.sample_count, args.snr_list)
+            args.sample_count, args.snr_list, args.wavelet_scaler)
     return 0
 
 
