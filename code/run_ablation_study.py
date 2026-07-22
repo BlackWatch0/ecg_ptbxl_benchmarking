@@ -22,6 +22,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from models.cbam_xresnet1d import build_model
 from utils import utils
+from utils import data_assets
 from utils.emd_features import (apply_emd_standardizer, fit_emd_standardizer,
                                 load_emd_features, resolve_emd_feature_columns)
 
@@ -47,6 +48,11 @@ DEFAULT_CONFIG = {
     'mixed_precision': True, 'data_root': 'data',
     'output_dir': '/content/drive/MyDrive/ECG/ablation_results', 'experiments': list(EXPERIMENTS),
 }
+
+
+def resolve_emd_paths(data_root):
+    """Compatibility wrapper for the shared EMD asset resolver."""
+    return data_assets.resolve_emd_paths(data_root)
 
 
 class ECGDataset(Dataset):
@@ -148,10 +154,8 @@ def eprint_environment(device):
 def load_data(config, output_root):
     configured_root = Path(config['data_root'])
     data_root = (configured_root if configured_root.is_absolute() else REPO_ROOT / configured_root).resolve()
-    clean_root = data_root / 'ptbxl_clean_no_noise'
+    clean_root = data_assets.clean_dataset_root(data_root)
     metadata_path = clean_root / 'ptbxl_database_clean_no_noise.csv'
-    if not metadata_path.exists():
-        raise FileNotFoundError('Missing clean PTB-XL metadata: {}'.format(metadata_path))
     raw, metadata = utils.load_dataset(str(clean_root), 100,
                                        database_filename=metadata_path.name, dataset_type='ptbxl')
     labels = utils.compute_label_aggregations(metadata, str(clean_root) + '/', 'superdiagnostic')
@@ -172,14 +176,7 @@ def load_data(config, output_root):
     train, val, test = split['train'], split['val'], split['test']
     train['ecg'], val['ecg'], test['ecg'] = utils.preprocess_signals(
         train['ecg'], val['ecg'], test['ecg'], str(output_root / 'config') + '/')
-    emd_paths = {
-        'clean': data_root / 'emd_features/original/PTBXL_Batch_Original_EMD_reduced_features.csv',
-        'snr24': data_root / 'emd_features/mixed_snr24/mixed_snr24_MAT_Batch_EMD_reduced_features.csv',
-        'snr12': data_root / 'emd_features/mixed_snr12/mixed_snr12_MAT_Batch_EMD_reduced_features.csv',
-        'snr6': data_root / 'emd_features/mixed_snr6/mixed_snr6_DenoisedCSV_EMD_reduced_features.csv',
-        'snr0': data_root / 'emd_features/mixed_snr0/mixed_snr0_DenoisedCSV_EMD_reduced_features.csv',
-        'snrm6': data_root / 'emd_features/mixed_snrm6/mixed_snrm6_MAT_Batch_EMD_reduced_features.csv',
-    }
+    emd_paths = resolve_emd_paths(data_root)
     existing = [path for path in emd_paths.values() if path.exists()]
     if not (emd_paths['clean'].exists()):
         raise FileNotFoundError('Clean EMD file is required: {}'.format(emd_paths['clean']))
@@ -210,23 +207,15 @@ def load_smoke_data(config, output_root):
     """Load real records without depending on the optional raw100.npy cache."""
     configured_root = Path(config['data_root'])
     data_root = (configured_root if configured_root.is_absolute() else REPO_ROOT / configured_root).resolve()
-    clean_root = data_root / 'ptbxl_clean_no_noise'
-    metadata = pd.read_csv(clean_root / 'ptbxl_database_clean_no_noise.csv', index_col='ecg_id')
-    metadata.scp_codes = metadata.scp_codes.apply(ast.literal_eval)
+    clean_root = data_assets.clean_dataset_root(data_root)
+    metadata = data_assets.load_metadata(clean_root, 'ptbxl_database_clean_no_noise.csv')
     labels = utils.compute_label_aggregations(metadata, str(clean_root) + '/', 'superdiagnostic')
     placeholder = np.empty(len(labels), dtype=object)
     _, labels, targets, mlb = utils.select_data(placeholder, labels, 'superdiagnostic', 0,
                                                  str(output_root / 'config') + '/', CLASS_NAMES)
     if mlb.classes_.tolist() != CLASS_NAMES:
         raise ValueError('Smoke test found incorrect class order {}'.format(mlb.classes_.tolist()))
-    emd_paths = {
-        'clean': data_root / 'emd_features/original/PTBXL_Batch_Original_EMD_reduced_features.csv',
-        'snr24': data_root / 'emd_features/mixed_snr24/mixed_snr24_MAT_Batch_EMD_reduced_features.csv',
-        'snr12': data_root / 'emd_features/mixed_snr12/mixed_snr12_MAT_Batch_EMD_reduced_features.csv',
-        'snr6': data_root / 'emd_features/mixed_snr6/mixed_snr6_DenoisedCSV_EMD_reduced_features.csv',
-        'snr0': data_root / 'emd_features/mixed_snr0/mixed_snr0_DenoisedCSV_EMD_reduced_features.csv',
-        'snrm6': data_root / 'emd_features/mixed_snrm6/mixed_snrm6_MAT_Batch_EMD_reduced_features.csv',
-    }
+    emd_paths = resolve_emd_paths(data_root)
     columns = resolve_emd_feature_columns([path for path in emd_paths.values() if path.exists()])
     split = {}
     masks = {'train': labels.strat_fold <= 8, 'val': labels.strat_fold == 9, 'test': labels.strat_fold == 10}
@@ -255,11 +244,7 @@ def load_smoke_data(config, output_root):
 
 def load_noisy_ecg(bundle, scenario, snr):
     test = bundle['splits']['test']
-    noisy_root = bundle['root'] / 'ptbxl_noisy_mixed_shared'
-    manifest_path = noisy_root / 'ptbxl_noisy_mixed_shared_manifest.csv'
-    if not manifest_path.exists():
-        raise FileNotFoundError('Missing noisy manifest: {}'.format(manifest_path))
-    manifest = pd.read_csv(manifest_path)
+    manifest, noisy_root = data_assets.load_noisy_manifest(bundle['root'])
     rows = manifest[manifest.snr_target_db == snr].set_index('ecg_id')
     duplicates = rows.index[rows.index.duplicated()].unique().tolist()
     missing = [int(x) for x in test['ids'] if x not in rows.index]
@@ -267,7 +252,7 @@ def load_noisy_ecg(bundle, scenario, snr):
         raise ValueError('{} waveform alignment failed; duplicate IDs: {}, missing IDs: {}'.format(
             scenario, duplicates[:20], missing[:20]))
     rows = rows.loc[test['ids']]
-    records = np.array([wfdb.rdsamp(str(noisy_root / path))[0] for path in rows.wfdb_record_relative])
+    records = data_assets.load_manifest_waveforms(manifest, noisy_root, snr, test['ids'])
     scaler_path = Path(bundle['scaler_path'])
     import pickle
     with open(scaler_path, 'rb') as file:

@@ -157,11 +157,83 @@ test_evaluate_exp0.py
 | 推理 | 标准化数据 + 模型权重 | `y_*_pred.npy` |
 | 评估 | `y_*_pred.npy`, `y_*.npy` | `te_results.csv` |
 
+## 原作者模型三测试域基准结果契约
+
+入口为 `run_original_models_benchmark_colab.sh`。训练固定使用 clean PTB-XL folds 1-8，fold 9 选择 validation-loss 最优 checkpoint，fold 10 在 clean、mixed-noise 和 denoised 三个测试域评估。noisy/denoised 均包含 24、12、6、0、-6 dB，并且必须按 `ecg_id` 对齐。
+
+数据下载地址统一维护在 `configs/datasets.json`，Shell 脚本不得再次硬编码 Drive ID。固定键为 `ptbxl_original`、`ptbxl_noisy`、`ptbxl_denoised`；每项必须包含 `role`、`url`、`drive_id`、`archive_name` 和 `format`。后续特征提取文件添加到 `feature_archives` 数组，建议每项沿用相同字段并增加唯一 `name` 和适用的 `scenario`，不得覆盖原始三数据集配置。
+
+已登记的 Wavelet 特征归档为 `wavelet_feature_extraction`（`1mGZRk_SJ20miD8DNvK_BjGtQhoJsA60O`）。它当前仅作为配置资产登记，不能在未实现并验证 ID/feature-column 对齐前替代直接 ECG Wavelet 特征提取。旧脚本仍硬编码的待甄别链接见 `docs/DOWNLOAD_LINKS_REVIEW.md`；收到替代链接后才可迁移到统一配置。
+
+必须包含七个原论文模型：`xresnet1d101`、`resnet1d_wang`、`lstm`、`lstm_bidir`、`fcn_wang`、`inception1d`、`wavelet_nn`。不得用 unsupported 状态或空行伪装 Wavelet+NN 已完成。
+
+固定 Google Drive 根目录：
+
+```text
+/content/drive/MyDrive/ECG/original_models_benchmark/
+```
+
+原始运行产物组成：
+
+```text
+original_models_benchmark/
+├── config/                 # resolved config、数据完整性、标准化器、smoke test
+├── checkpoints/            # best/last checkpoint、thresholds、model_info
+├── training_logs/          # 每模型逐 epoch train/valid loss 与 learning rate
+├── features/wavelet_nn/    # 按 ID 对齐的 Wavelet 特征缓存
+├── predictions/            # validation 和三测试域逐记录概率/预测
+├── metrics/                # 三阈值整体、逐类、复杂度、完整性指标
+├── errors/                 # 失败 traceback
+├── completed_models.json
+├── final_report/
+└── original_models_benchmark_report.zip
+```
+
+必须保存三种阈值策略：`threshold_0.5`、`best_global_threshold`、`per_class_thresholds`。最终主比较使用 validation set 选择的 `per_class_thresholds`，阈值不得在 test set 上优化。
+
+整体指标至少包含：`macro_roc_auc`、`micro_roc_auc`、`macro_pr_auc`、`micro_pr_auc`、`macro_f1`、`micro_f1`、`samples_f1`、`label_accuracy`、`exact_match_accuracy`、`predicted_positive_rate`、`mean_predicted_labels`、`all_zero_prediction_rate`。
+
+逐类指标必须按 `NORM, MI, STTC, CD, HYP` 输出：`roc_auc`、`pr_auc`、`precision`、`recall`、`specificity`、`f1`、`support_positive`、`support_negative`、`predicted_positive_count`。
+
+复杂度字段至少包含：`parameter_count`、`trainable_parameter_count`、`training_time_seconds`、`best_epoch`、`best_valid_loss`、`inference_time_per_sample_ms`、`actual_batch_size`。Wavelet+NN 的特征提取与分类器信息必须保留在配置和模型信息中。
+
+`final_report/` 不得使用简化输出，必须包含：
+
+```text
+benchmark_summary.csv
+clean_comparison.csv
+noisy_snr_comparison.csv
+denoised_snr_comparison.csv
+denoising_contributions.csv
+robustness_metrics.csv
+mean_domain_metrics.csv
+per_class_metrics.csv
+model_complexity.csv
+best_model_summary.json
+ORIGINAL_MODELS_BENCHMARK_RESULTS.md
+figures/*.png
+figures/*.pdf
+```
+
+图表必须覆盖 noisy/denoised 的 Macro ROC-AUC 与 Macro F1 vs SNR、相对 clean 的下降、clean 与 -6 dB 逐类表现、参数量/推理时间权衡、每个模型 train/valid loss、noisy 与 denoised 对比。坐标和图例使用可读英文显示名，不能直接使用内部变量名作为最终轴标签。
+
+最终 ZIP 固定为：
+
+```text
+/content/drive/MyDrive/ECG/original_models_benchmark/original_models_benchmark_report.zip
+```
+
+ZIP 包含 `final_report/`、`metrics/`、`predictions/`、`training_logs/` 和 `config/`。checkpoint 和大型 Wavelet 缓存保留在 Drive 根目录，不放入 ZIP，也不得提交到 Git。
+
 ## 添加新模型
 
 1. 在 `code/models/` 中创建 `your_new_model.py`，实现 `fit()` 和 `predict()`
 2. 在 `code/configs/your_new_configs.py` 中定义配置
 3. 在 `code/experiments/scp_experiment.py` 的 `perform()` 中添加 `elif modeltype == "your_type":`
+4. **同步更新根目录的 `model_architecture_summary.md` 和 `model_architecture_summary.json`。** 该要求适用于新增模型、可训练配置变体、factory/registry builder 注册项、attention、feature branch、fusion 或 classifier 的实质变更。
+5. 架构报告必须基于实际构造函数、配置和训练入口追踪；记录模型定义/训练文件、输入输出 shape、主干、attention、特征分支、fusion、分类头、训练配置、参数量或无法实例化原因、以及静态风险。不要仅按文件名登记模型。
+6. 如环境允许，使用随机小张量做一次不加载数据、不训练的 dummy `forward`；否则在报告中写明完整失败摘要。同步更新 Markdown 的人工说明和 JSON 的机器可读条目。
+7. 为新模型提供 `evaluation/model_registry.py` 可使用的 factory 或 adapter，并通过统一 `evaluation/evaluate.py` 验证 CPU 单输入/feature-only/late-fusion 调用、严格 checkpoint 加载、输出类别数和标准结果 schema。不要为新模型另写一套不兼容的指标或测试目录。
 
 ## 测试
 

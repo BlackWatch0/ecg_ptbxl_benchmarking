@@ -1,0 +1,56 @@
+{
+  "datasets": {
+    "ptbxl_original": {
+      "role": "clean_train_validation_test",
+      "url": "https://drive.google.com/file/d/1SvI2suvuKf4KJ7bikHuGp0PVNAjRJ6Ge/view",
+      "drive_id": "1SvI2suvuKf4KJ7bikHuGp0PVNAjRJ6Ge",
+      "archive_name": "ptb-xl-1.0.3.zip",
+      "format": "zip"
+    },
+    "ptbxl_noisy": {
+      "role": "noisy_test",
+      "url": "https://drive.google.com/file/d/1aCC9jzUUqXJjgrXoRTfRlroOMMSa505u/view",
+      "drive_id": "1aCC9jzUUqXJjgrXoRTfRlroOMMSa505u",
+      "archive_name": "ptbxl_original_database_plus_mixed_WFDB.tar",
+      "format": "tar"
+    },
+    "ptbxl_denoised": {
+      "role": "denoised_test",
+      "url": "https://drive.google.com/file/d/1gjnomlJreB8ttsuRoOiD8DM8IXaa7ciD/view",
+      "drive_id": "1gjnomlJreB8ttsuRoOiD8DM8IXaa7ciD",
+      "archive_name": "denoised_WFDB.tar",
+      "format": "tar"
+    }
+  },
+  "feature_archives": [
+    {
+      "name": "wavelet_feature_extraction",
+      "scenario": "clean_noisy_denoised",
+      "role": "precomputed_wavelet_features",
+      "url": "https://drive.google.com/file/d/1mGZRk_SJ20miD8DNvK_BjGtQhoJsA60O/view",
+      "drive_id": "1mGZRk_SJ20miD8DNvK_BjGtQhoJsA60O",
+      "archive_name": "Wavelet feature extraction.tar",
+      "format": "tar",
+      "description": "72 precomputed wavelet statistics across original, mixed-noisy, and denoised PTB-XL scenarios."
+    },
+    {
+      "name": "time_domain_feature_extraction",
+      "scenario": "clean_noisy_denoised",
+      "role": "precomputed_beat_level_time_domain_features",
+      "url": "https://drive.google.com/file/d/1wD8Mb216Xd0pjCJhCUrr2nsDhaBaEi-Q/view",
+      "drive_id": "1wD8Mb216Xd0pjCJhCUrr2nsDhaBaEi-Q",
+      "archive_name": "Time Domain Feature extraction.tar.zst",
+      "format": "tar",
+      "compression": "zstd",
+      "description": "13 beat-level Lead II time-domain/hybrid features for clean, mixed-noisy, and denoised PTB-XL scenarios. Align rows with RecordNumber, LeadIndex, and BeatIndex."
+    }
+  ],
+  "pending_assets": [
+    {
+      "name": "emd_features",
+      "role": "emd_late_fusion_features",
+      "status": "source_required",
+      "description": "A replacement EMD feature archive must provide the 11-feature-per-lead schema required by the EMD late-fusion workflows."
+    }
+  ]
+}

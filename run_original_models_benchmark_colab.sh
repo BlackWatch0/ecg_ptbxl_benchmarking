@@ -6,13 +6,8 @@ DRIVE_ROOT="/content/drive/MyDrive"
 OUTPUT_ROOT="${ORIGINAL_MODELS_BENCHMARK_OUTPUT_DIR:-${DRIVE_ROOT}/ECG/original_models_benchmark}"
 DOWNLOAD_ROOT="${ORIGINAL_MODELS_BENCHMARK_DOWNLOAD_DIR:-/content/original_models_benchmark_downloads}"
 SETUP_ROOT="${ORIGINAL_MODELS_BENCHMARK_DATA_DIR:-/content/original_models_benchmark_data}"
-CLEAN_DRIVE_ID="${ORIGINAL_MODELS_CLEAN_DRIVE_ID:-1SvI2suvuKf4KJ7bikHuGp0PVNAjRJ6Ge}"
-NOISY_DRIVE_ID="${ORIGINAL_MODELS_NOISY_DRIVE_ID:-1aCC9jzUUqXJjgrXoRTfRlroOMMSa505u}"
-DENOISED_DRIVE_ID="${ORIGINAL_MODELS_DENOISED_DRIVE_ID:-1gjnomlJreB8ttsuRoOiD8DM8IXaa7ciD}"
-CLEAN_ARCHIVE="${DOWNLOAD_ROOT}/ptb-xl-1.0.3.zip"
+DATASET_CONFIG="${ORIGINAL_MODELS_DATASET_CONFIG:-${ROOT}/configs/datasets.json}"
 CLEAN_DRIVE_CACHE="${ORIGINAL_MODELS_CLEAN_CACHE:-${DRIVE_ROOT}/ECG/datasets/ptbxl_1.0.3_records100.tar}"
-NOISY_ARCHIVE="${DOWNLOAD_ROOT}/ptbxl_original_database_plus_mixed_WFDB.tar"
-DENOISED_ARCHIVE="${DOWNLOAD_ROOT}/denoised_WFDB.tar"
 DATA_CONFIG="${SETUP_ROOT}/normalized/original_models_benchmark_data.json"
 
 if [[ ! -d "${DRIVE_ROOT}" ]]; then
@@ -46,6 +41,44 @@ print("Wavelet+NN runtime: TensorFlow {}, PyWavelets {}".format(tf.__version__, 
 PY
 
 mkdir -p "${DOWNLOAD_ROOT}" "${SETUP_ROOT}/extracted" "${OUTPUT_ROOT}/training_logs"
+
+eval "$(python - "${DATASET_CONFIG}" <<'PY'
+import json
+import os
+import shlex
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+config = json.loads(path.read_text())
+datasets = config.get('datasets', {})
+mapping = {
+    'CLEAN': 'ptbxl_original',
+    'NOISY': 'ptbxl_noisy',
+    'DENOISED': 'ptbxl_denoised',
+}
+for prefix, key in mapping.items():
+    item = datasets.get(key)
+    if not item:
+        raise SystemExit('Dataset config {} is missing {}'.format(path, key))
+    for field in ('url', 'drive_id', 'archive_name', 'format', 'role'):
+        if not item.get(field):
+            raise SystemExit('Dataset {} is missing {}'.format(key, field))
+    if Path(item['archive_name']).name != item['archive_name']:
+        raise SystemExit('archive_name must be a file name: {}'.format(item['archive_name']))
+    print('CONFIG_{}_DRIVE_ID={}'.format(prefix, shlex.quote(item['drive_id'])))
+    print('CONFIG_{}_ARCHIVE_NAME={}'.format(prefix, shlex.quote(item['archive_name'])))
+print('FEATURE_ARCHIVE_COUNT={}'.format(len(config.get('feature_archives', []))))
+PY
+)"
+
+CLEAN_DRIVE_ID="${ORIGINAL_MODELS_CLEAN_DRIVE_ID:-${CONFIG_CLEAN_DRIVE_ID}}"
+NOISY_DRIVE_ID="${ORIGINAL_MODELS_NOISY_DRIVE_ID:-${CONFIG_NOISY_DRIVE_ID}}"
+DENOISED_DRIVE_ID="${ORIGINAL_MODELS_DENOISED_DRIVE_ID:-${CONFIG_DENOISED_DRIVE_ID}}"
+CLEAN_ARCHIVE="${DOWNLOAD_ROOT}/${CONFIG_CLEAN_ARCHIVE_NAME}"
+NOISY_ARCHIVE="${DOWNLOAD_ROOT}/${CONFIG_NOISY_ARCHIVE_NAME}"
+DENOISED_ARCHIVE="${DOWNLOAD_ROOT}/${CONFIG_DENOISED_ARCHIVE_NAME}"
+echo "Dataset config: ${DATASET_CONFIG} (${FEATURE_ARCHIVE_COUNT} feature archives configured)"
 
 download_if_absent() {
   local drive_id="$1"

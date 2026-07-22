@@ -5,15 +5,16 @@ import numpy as np
 import pandas as pd
 
 from utils import utils
+from utils import data_assets
 
 DATA_ROOT = Path('../data')
 CLEAN_ROOT = DATA_ROOT / 'ptbxl_clean_no_noise'
 
 
 def main():
-    metadata = pd.read_csv(CLEAN_ROOT / 'ptbxl_database_clean_no_noise.csv', index_col='ecg_id')
-    metadata.scp_codes = metadata.scp_codes.apply(ast.literal_eval)
-    labels = utils.compute_label_aggregations(metadata.copy(), str(CLEAN_ROOT) + '/', 'superdiagnostic')
+    clean_root = data_assets.clean_dataset_root(DATA_ROOT)
+    metadata = data_assets.load_metadata(clean_root, 'ptbxl_database_clean_no_noise.csv')
+    labels = utils.compute_label_aggregations(metadata.copy(), str(clean_root) + '/', 'superdiagnostic')
     _, labels, y, mlb = utils.select_data(
         np.empty(len(labels), dtype=object), labels, 'superdiagnostic', 0, '/tmp/',
         class_order=['NORM', 'MI', 'STTC', 'CD', 'HYP']

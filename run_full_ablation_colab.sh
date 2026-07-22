@@ -13,26 +13,18 @@ if [[ -d /content/drive/MyDrive ]]; then
   DEFAULT_OUTPUT_ROOT="/content/drive/MyDrive/ECG/ablation_results_full_ptbxl"
 fi
 OUTPUT_ROOT="${FULL_ABLATION_OUTPUT_DIR:-${DEFAULT_OUTPUT_ROOT}}"
-CLEAN_PATCH_URL='https://drive.google.com/file/d/1cUF8FSCaGKG4n-QED4NSB4Pb1TSpvEBD/view'
-NOISY_PATCH_URL='https://drive.google.com/file/d/14K_jEbRHTnkiP6Qb2qChB7kN6B9UulHE/view'
 
 python -m pip install -q gdown wfdb pyyaml scikit-learn matplotlib "pandas==2.2.2"
 mkdir -p "${DOWNLOAD_ROOT}" "${OUTPUT_ROOT}"
 
-if ! python "${ROOT}/code/colab_data_setup.py" validate --data-root "${DATA_ROOT}"; then
+if [[ ! -f "${DATA_ROOT}/ptbxl_clean_no_noise/ptbxl_database_clean_no_noise.csv" || ! -f "${DATA_ROOT}/ptbxl_noisy_mixed_shared/ptbxl_noisy_mixed_shared_manifest.csv" || ! -f "${DATA_ROOT}/emd_features/original/PTBXL_Batch_Original_EMD_reduced_features.csv" ]]; then
   bash "${ROOT}/colab_run.sh" --prepare
 fi
 
-CLEAN_ARCHIVE="${DOWNLOAD_ROOT}/ptbxl_original_noisy_remaining.tar"
-NOISY_ARCHIVE="${DOWNLOAD_ROOT}/ptbxl_original_noisy_remaining_plus_mixed_noise.tar"
-[[ -f "${CLEAN_ARCHIVE}" ]] || gdown --fuzzy "${CLEAN_PATCH_URL}" --output "${CLEAN_ARCHIVE}"
-[[ -f "${NOISY_ARCHIVE}" ]] || gdown --fuzzy "${NOISY_PATCH_URL}" --output "${NOISY_ARCHIVE}"
-
-python "${ROOT}/code/merge_ptbxl_remaining_data.py" merge \
-  --data-root "${DATA_ROOT}" \
-  --clean-archive "${CLEAN_ARCHIVE}" \
-  --noisy-archive "${NOISY_ARCHIVE}" \
-  --workspace "${DOWNLOAD_ROOT}"
+if [[ ! -f "${DATA_ROOT}/emd_features/original/PTBXL_Batch_Original_EMD_reduced_features.csv" ]]; then
+  echo "EMD feature archive is TODO: set EMD_ARCHIVE_PATH and run bash colab_run.sh --prepare before this ablation." >&2
+  exit 1
+fi
 
 python -u "${ROOT}/code/run_ablation_study.py" \
   --config "${ROOT}/configs/ablation_cbam_emd.yaml" \
