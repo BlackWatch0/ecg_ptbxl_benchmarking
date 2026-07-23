@@ -707,7 +707,8 @@ def _tensorflow():
 
 def train_wavelet_classifier(train_features, train_labels, val_features, val_labels,
                              checkpoint_dir, history_path, seed, resume=False,
-                             evaluate_only=False):
+                             evaluate_only=False, epochs=WAVELET_EPOCHS,
+                             batch_size=WAVELET_BATCH_SIZE):
     """Fit or restore the original Wavelet+NN classifier and train-only scaler."""
     tf = _tensorflow()
     scaler_path = checkpoint_dir / 'standard_scaler.pkl'
@@ -746,7 +747,7 @@ def train_wavelet_classifier(train_features, train_labels, val_features, val_lab
         model = build_wavelet_nn(train_scaled.shape[1])
         initial_epoch = 0
     started = time.time()
-    if not evaluate_only and initial_epoch < WAVELET_EPOCHS:
+    if not evaluate_only and initial_epoch < epochs:
         class HistoryCheckpoint(tf.keras.callbacks.Callback):
             def on_epoch_end(self, epoch, logs=None):
                 logs = logs or {}
@@ -774,8 +775,8 @@ def train_wavelet_classifier(train_features, train_labels, val_features, val_lab
         ]
         model.fit(train_scaled, train_labels,
                   validation_data=(val_scaled, val_labels),
-                  epochs=WAVELET_EPOCHS, initial_epoch=initial_epoch,
-                  batch_size=WAVELET_BATCH_SIZE, callbacks=callbacks, verbose=2)
+                  epochs=epochs, initial_epoch=initial_epoch,
+                  batch_size=batch_size, callbacks=callbacks, verbose=2)
     training_seconds = time.time() - started
     if not best_path.exists():
         raise FileNotFoundError('Wavelet best-validation-loss checkpoint is missing: {}'.format(best_path))
@@ -790,11 +791,11 @@ def train_wavelet_classifier(train_features, train_labels, val_features, val_lab
     return best_model, scaler, best_epoch, best_loss, training_seconds, best_path
 
 
-def predict_wavelet(model, scaler, features):
+def predict_wavelet(model, scaler, features, batch_size=WAVELET_BATCH_SIZE):
     started = time.time()
     probabilities = np.asarray(model.predict(
         scaler.transform(features).astype(np.float32),
-        batch_size=WAVELET_BATCH_SIZE, verbose=0))
+        batch_size=batch_size, verbose=0))
     return probabilities, (time.time() - started) * 1000 / len(features)
 
 
@@ -816,8 +817,10 @@ def run_wavelet(seed, splits, scenarios, output_root, args):
         train_wavelet_classifier(
             train_features, splits['train']['labels'], val_features, splits['val']['labels'],
             checkpoint_dir, history_path, seed, resume=args.resume,
-            evaluate_only=args.evaluate_only)
-    val_prob, _ = predict_wavelet(model, scaler, val_features)
+            evaluate_only=args.evaluate_only, epochs=args.wavelet_epochs,
+            batch_size=args.wavelet_batch_size)
+    val_prob, _ = predict_wavelet(
+        model, scaler, val_features, batch_size=args.wavelet_batch_size)
     val_y = splits['val']['labels']
     global_threshold, per_class_thresholds, curve = threshold_results(val_y, val_prob)
     json_dump(checkpoint_dir / 'thresholds.json', {
@@ -830,6 +833,8 @@ def run_wavelet(seed, splits, scenarios, output_root, args):
     per_class_array = np.array([per_class_thresholds[name] for name in CLASS_NAMES])
     save_predictions(prediction_dir / 'validation_predictions.csv', splits['val']['ids'],
                      val_y, val_prob, (val_prob >= per_class_array).astype(int))
+    if args.skip_test_evaluation:
+        return
     all_scenarios = [('clean', None, splits['test']['ecg'], {
         'number_of_test_records': len(splits['test']['ids']),
         'number_of_matched_ecg_records': len(splits['test']['ids']),
@@ -842,7 +847,8 @@ def run_wavelet(seed, splits, scenarios, output_root, args):
     for scenario, snr, ecg, integrity in all_scenarios:
         features = cache_wavelet_features(
             ecg, splits['test']['ids'], scenario, output_root)
-        probabilities, inference_ms = predict_wavelet(model, scaler, features)
+        probabilities, inference_ms = predict_wavelet(
+            model, scaler, features, batch_size=args.wavelet_batch_size)
         y_test = splits['test']['labels']
         json_dump(metric_dir / 'seed_{}_{}_integrity.json'.format(seed, scenario), integrity)
         for strategy, threshold in (
@@ -861,7 +867,7 @@ def run_wavelet(seed, splits, scenarios, output_root, args):
                 'parameter_count': parameter_count,
                 'trainable_parameter_count': trainable_count,
                 'inference_time_per_sample_ms': inference_ms,
-                'actual_batch_size': WAVELET_BATCH_SIZE,
+                'actual_batch_size': args.wavelet_batch_size,
                 'checkpoint_path': str(best_path), 'crop_length': np.nan,
                 'crop_stride': np.nan, 'crop_aggregation': 'not_used',
                 'status': 'completed',
@@ -883,7 +889,7 @@ def run_wavelet(seed, splits, scenarios, output_root, args):
         'seed': seed, 'best_epoch': best_epoch, 'best_valid_loss': best_loss,
         'training_time_seconds': training_seconds, 'parameter_count': parameter_count,
         'trainable_parameter_count': trainable_count,
-        'actual_batch_size': WAVELET_BATCH_SIZE, 'checkpoint_path': str(best_path),
+        'actual_batch_size': args.wavelet_batch_size, 'checkpoint_path': str(best_path),
         'status': 'completed',
     }
     json_dump(checkpoint_dir / 'model_info.json', model_info)
@@ -1061,6 +1067,8 @@ def parse_args(argv=None):
     parser.add_argument('--seeds', nargs='+', type=int, default=[42])
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--batch-size', type=int, default=128)
+    parser.add_argument('--wavelet-epochs', type=int, default=WAVELET_EPOCHS)
+    parser.add_argument('--wavelet-batch-size', type=int, default=WAVELET_BATCH_SIZE)
     parser.add_argument('--learning-rate', type=float)
     parser.add_argument('--crop-length', type=int, default=CROP_LENGTH)
     parser.add_argument('--num-workers', type=int, default=0)
@@ -1089,6 +1097,10 @@ def main(argv=None):
         raise ValueError('--smoke-test and --one-batch-smoke-test cannot be combined')
     if args.crop_length < 1:
         raise ValueError('--crop-length must be positive')
+    if args.epochs < 1 or args.batch_size < 1:
+        raise ValueError('--epochs and --batch-size must be positive')
+    if args.wavelet_epochs < 1 or args.wavelet_batch_size < 1:
+        raise ValueError('--wavelet-epochs and --wavelet-batch-size must be positive')
     unknown = [name for name in args.models
                if canonical_model_name(name) not in BENCHMARK_MODEL_NAMES + (SE_MODEL_NAME,)]
     if unknown:
@@ -1110,8 +1122,8 @@ def main(argv=None):
             'wavelet': 'db6', 'decomposition_level': 5,
             'dense_units': 128, 'dropout': .25, 'activation': 'relu',
             'output_activation': 'sigmoid', 'optimizer': 'Adamax',
-            'loss': 'binary_crossentropy', 'epochs': WAVELET_EPOCHS,
-            'batch_size': WAVELET_BATCH_SIZE,
+            'loss': 'binary_crossentropy', 'epochs': args.wavelet_epochs,
+            'batch_size': args.wavelet_batch_size,
             'checkpoint_selection': 'minimum clean validation loss',
             'feature_scaler': 'StandardScaler fit on clean training folds 1-8 only',
         },

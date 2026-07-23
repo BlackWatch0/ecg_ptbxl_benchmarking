@@ -110,10 +110,12 @@ def compute_metrics(data, features=FEATURE_COLUMNS, scales=None, level="beat", a
     scales = scales or {feature: clean_scale(data[feature + "_clean"]) for feature in features}
     rows = []
     nmae_values = []
+    complete_13d = True
     for feature in features:
         left = data[feature + "_clean"].to_numpy(dtype=float)
         right = data[feature + "_comparison"].to_numpy(dtype=float)
         valid = np.isfinite(left) & np.isfinite(right)
+        complete_13d = complete_13d and bool(np.isfinite(right).all())
         nmae = np.mean(np.abs(right[valid] - left[valid])) / scales[feature].value if valid.any() else np.nan
         nmae_values.append(nmae)
         rows.append({"comparison": data.comparison.iloc[0], "snr_db": data.snr_db.iloc[0],
@@ -122,7 +124,8 @@ def compute_metrics(data, features=FEATURE_COLUMNS, scales=None, level="beat", a
                      "clean_scale": scales[feature].value, "clean_scale_method": scales[feature].method,
                      "clean_p05": scales[feature].p05, "clean_p95": scales[feature].p95, "nmae": nmae})
     raw, scaled = _vector_cosines(data, features, scales)
-    strict_nmae = np.mean(nmae_values) if np.isfinite(nmae_values).all() else np.nan
+    strict_nmae = (np.mean(nmae_values)
+                   if complete_13d and np.isfinite(nmae_values).all() else np.nan)
     macro = {"comparison": data.comparison.iloc[0], "snr_db": data.snr_db.iloc[0],
              "evaluation_level": level, "aggregation": aggregation, "feature": "__macro_13d__",
              "n_total": len(data), "n_valid": int(np.isfinite(raw).sum()),

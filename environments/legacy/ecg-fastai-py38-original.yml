@@ -1,4 +1,4 @@
-name: ecg_env
+name: ecg-fastai-py38-original
 channels:
   - pytorch
   - fastai

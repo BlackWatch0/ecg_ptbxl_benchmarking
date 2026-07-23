@@ -1,0 +1,60 @@
+version: 1
+
+# taskmanager 状态、日志以及模型产物共享同一个运行根目录。
+output_dir: ../../results/original_models_benchmark
+
+global:
+  # clean PTB-XL 根目录需要包含 metadata CSV 和 records100/。
+  data_root: ../../data/ptbxl
+  # 该文件由 prepare_original_data.yaml 生成，登记 noisy/denoised manifest。
+  data_config: ../../data/normalized/original_models_benchmark_data.json
+  seed: 42
+  epochs: 50
+  batch_size: 128
+  wavelet_epochs: 30
+  wavelet_batch_size: 128
+  crop_length: 250
+  num_workers: 0
+  device: cuda
+  resume: true
+  fail_fast: false
+
+# 列表也可缩减为任意需要训练和评估的模型。
+models:
+  xresnet1d101: {}
+  resnet1d_wang: {}
+  lstm:
+    learning_rate: 0.001
+  lstm_bidir:
+    learning_rate: 0.001
+  fcn_wang: {}
+  inception1d: {}
+  wavelet_nn: {}
+
+model_groups:
+  all_original:
+    - xresnet1d101
+    - resnet1d_wang
+    - lstm
+    - lstm_bidir
+    - fcn_wang
+    - inception1d
+    - wavelet_nn
+
+tasks:
+  - name: train
+    type: train
+    models: "@all_original"
+
+  - name: evaluate
+    type: evaluate
+    depends_on: [train]
+    models: "@all_original"
+
+  - name: report
+    type: report
+    depends_on: [evaluate]
+
+  - name: package
+    type: package
+    depends_on: [report]

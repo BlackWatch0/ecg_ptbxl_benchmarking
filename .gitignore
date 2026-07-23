@@ -29,6 +29,13 @@ data/
 
 # Generated training outputs
 output/
+/results/
+
+# Taskmanager runtime data; configs/taskmanager remains trackable
+**/task_status.json
+**/task_plan.json
+**/task_logs/
+**/task_plan_logs/
 
 # Model checkpoints
 *.pth

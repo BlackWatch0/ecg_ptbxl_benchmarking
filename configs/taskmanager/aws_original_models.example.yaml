@@ -1,0 +1,40 @@
+version: 1
+
+# AWS 上所有训练 I/O 都落在持久化加密 EBS；S3 同步由操作者执行。
+output_dir: /mnt/ecg/runs/original_models_seed42
+
+global:
+  data_root: /mnt/ecg/data/ptbxl
+  data_config: /mnt/ecg/data/normalized/original_models_benchmark_data.json
+  seed: 42
+  epochs: 50
+  batch_size: 128
+  wavelet_epochs: 30
+  wavelet_batch_size: 128
+  crop_length: 250
+  num_workers: 4
+  device: cuda
+  resume: true
+  fail_fast: false
+
+models:
+  - xresnet1d101
+  - resnet1d_wang
+  - lstm
+  - lstm_bidir
+  - fcn_wang
+  - inception1d
+  - wavelet_nn
+
+tasks:
+  - name: train
+    type: train
+  - name: evaluate
+    type: evaluate
+    depends_on: [train]
+  - name: report
+    type: report
+    depends_on: [evaluate]
+  - name: package
+    type: package
+    depends_on: [report]

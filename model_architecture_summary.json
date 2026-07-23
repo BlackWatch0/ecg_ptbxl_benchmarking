@@ -1,182 +1,270 @@
 {
-  "generated_from": "static repository inspection",
-  "dummy_forward": {
-    "attempted": true,
-    "successful": 0,
-    "failed": 12,
-    "error": "ModuleNotFoundError: No module named 'torch'",
-    "note": "No large dependency was installed and no dataset was loaded."
+  "inspection": {
+    "date": "2026-07-23",
+    "source": "current repository inspection",
+    "dataset_loaded": false,
+    "training_started": false,
+    "parameter_counts": {
+      "status": "not_recorded",
+      "note": "This inventory did not measure or infer parameter counts."
+    }
+  },
+  "verification": {
+    "environment": {
+      "python": "3.13.12",
+      "torch": "2.12.1+cpu",
+      "pytest": "9.1.1"
+    },
+    "existing_test_command": "python -m pytest -q -p no:debugging tests/test_ablation_factory.py tests/test_cbam_xresnet1d.py tests/test_se_xresnet1d.py tests/test_original_models_benchmark.py::test_original_model_factory_forward tests/test_original_models_benchmark.py::test_wavelet_alias_uses_feature_factory tests/test_original_models_benchmark.py::test_wavelet_factory_preserves_original_architecture",
+    "existing_test_result": {
+      "passed": 14,
+      "failed": 0,
+      "warnings": 4,
+      "duration_seconds": 7.46,
+      "warning_type": "PyTorch torch.jit.script deprecation",
+      "dataset_loaded": false,
+      "training_loop_run": false
+    },
+    "wavelet_late_fusion_direct_dummy": {
+      "reason": "No existing pytest covers the two Wavelet late-fusion modules.",
+      "mode": "eval and torch.no_grad",
+      "inputs": {
+        "ecg": "[1,12,1000]",
+        "wavelet": "[1,12,6]"
+      },
+      "results": {
+        "xresnet_ecg": "finite [1,5] logits",
+        "cbam_ecg": "finite [1,5] logits",
+        "xresnet_wavelet": "finite [1,5] logits",
+        "cbam_wavelet": "finite [1,5] logits",
+        "se_ecg": "finite [1,5] logits",
+        "se_wavelet": "finite [1,5] logits"
+      }
+    }
+  },
+  "entry_points": {
+    "canonical_unified_entry": "taskmanager.py:1-15",
+    "scope": "prepare, train, evaluate, and report for the seven original benchmark models only",
+    "canonical_model_catalog": "code/models/original_model_catalog.py:3-33",
+    "model_factory": "code/models/original_model_factory.py:14-63",
+    "taskmanager_model_import": "code/task_manager/models.py:1-5",
+    "taskmanager_runner_mapping": "code/task_manager/runner.py:12-18,100-114",
+    "taskmanager_config": "configs/taskmanager/original_models_benchmark.yaml:21-54",
+    "legacy_shell_status": "Historical launchers are under scripts/legacy and are not a current Bash entry or taskmanager dependency.",
+    "not_orchestrated_by_taskmanager": [
+      "attention ablations",
+      "EMD ablations",
+      "Wavelet late-fusion ablations",
+      "unified evaluation",
+      "legacy FastAI inference",
+      "Lightning inference"
+    ]
+  },
+  "class_contract": {
+    "task": "superdiagnostic multilabel classification",
+    "class_order": ["NORM", "MI", "STTC", "CD", "HYP"],
+    "pytorch_output": "logits [B,5]",
+    "pytorch_loss": "BCEWithLogitsLoss",
+    "wavelet_nn_output": "sigmoid probabilities [B,5]",
+    "wavelet_nn_loss": "binary_crossentropy"
   },
   "models": [
     {
       "name": "xResNet1D101 baseline",
-      "class_name": "CBAMXResNet1DLateFusion(input_mode=ecg_only,use_cbam=False,use_se=False)",
-      "definition_file": "code/models/cbam_xresnet1d.py:83-203",
-      "training_entry": "code/run_ablation_study.py:529-634",
-      "config": "configs/ablation_cbam_emd.yaml; EXPERIMENTS.xresnet1d101_baseline",
-      "input_shapes": {"ecg": "[B,12,T]", "output_logits": "[B,5]"},
-      "backbone": {"name": "XResNet1d101", "layers": [3, 4, 23, 3], "embedding": 512},
-      "attention": {"type": "none"},
+      "implementation": "code/models/cbam_xresnet1d.py:83-234",
+      "training_entry": "code/run_ablation_study.py:510-558",
+      "config": "configs/ablation_cbam_emd.yaml; configs/ablation_se.yaml",
+      "inputs": {"ecg": "[B,12,T]"},
+      "backbone": {"name": "xResNet1D101", "layers": [3, 4, 23, 3], "expansion": 4, "embedding_dim": 512},
+      "attention": "none",
       "feature_branch": null,
       "fusion": null,
       "classifier": "Linear(512,5), logits",
-      "parameter_count": {"status": "unavailable locally: torch missing"},
-      "training_config": {"loss": "BCEWithLogitsLoss", "optimizer": "Adam", "scheduler": "OneCycleLR", "epochs": 50, "batch_size": 128},
-      "potential_issues": ["Clean EMD assets are loaded even for this waveform-only variant."]
+      "parameter_count": null,
+      "status": "architecture active; direct EMD runner is data-asset blocked"
     },
     {
       "name": "CBAM-xResNet1D101",
-      "class_name": "CBAMXResNet1DLateFusion(input_mode=ecg_only,use_cbam=True)",
-      "definition_file": "code/models/cbam_xresnet1d.py:7-34,56-80,83-203",
-      "training_entry": "code/run_ablation_study.py:529-634",
-      "config": "configs/ablation_cbam_emd.yaml; EXPERIMENTS.cbam_xresnet1d101",
-      "input_shapes": {"ecg": "[B,12,T]", "output_logits": "[B,5]"},
-      "backbone": {"name": "XResNet1d101", "layers": [3, 4, 23, 3], "embedding": 512},
-      "attention": {"type": "CBAM", "location": "each residual block", "channel_reduction": 16, "temporal_kernel": 7},
+      "implementation": "code/models/cbam_xresnet1d.py:7-34,56-80,83-234",
+      "training_entry": "code/run_ablation_study.py:510-558",
+      "config": "configs/ablation_cbam_emd.yaml",
+      "inputs": {"ecg": "[B,12,T]"},
+      "backbone": {"name": "xResNet1D101", "embedding_dim": 512},
+      "attention": {"type": "CBAM", "location": "residual branch before addition", "channel_reduction": 16, "temporal_kernel": 7},
       "feature_branch": null,
       "fusion": null,
       "classifier": "Linear(512,5), logits",
-      "parameter_count": {"status": "unavailable locally: torch missing"},
-      "training_config": {"loss": "BCEWithLogitsLoss", "optimizer": "Adam", "scheduler": "OneCycleLR"},
-      "potential_issues": ["Clean EMD assets are loaded even for this waveform-only variant."]
+      "parameter_count": null,
+      "status": "architecture active; direct EMD runner is data-asset blocked"
     },
     {
       "name": "SE-xResNet1D101",
-      "class_name": "CBAMXResNet1DLateFusion(input_mode=ecg_only,use_se=True)",
-      "definition_file": "code/models/cbam_xresnet1d.py:37-53,56-80,83-203",
-      "training_entry": "code/run_ablation_study.py:529-634",
-      "config": "configs/ablation_se.yaml; EXPERIMENTS.se_xresnet1d101",
-      "input_shapes": {"ecg": "[B,12,T]", "output_logits": "[B,5]"},
-      "backbone": {"name": "XResNet1d101", "layers": [3, 4, 23, 3], "embedding": 512},
-      "attention": {"type": "SqueezeExcitation1d", "location": "each residual block", "reduction": 16},
+      "implementation": "code/models/cbam_xresnet1d.py:37-80,83-234",
+      "training_entry": "code/run_ablation_study.py:510-558",
+      "config": "configs/ablation_se.yaml",
+      "inputs": {"ecg": "[B,12,T]"},
+      "backbone": {"name": "xResNet1D101", "embedding_dim": 512},
+      "attention": {"type": "SE", "location": "residual branch before addition", "reduction": 16},
       "feature_branch": null,
       "fusion": null,
       "classifier": "Linear(512,5), logits",
-      "parameter_count": {"status": "unavailable locally: torch missing"},
-      "training_config": {"loss": "BCEWithLogitsLoss", "optimizer": "Adam", "scheduler": "OneCycleLR"},
-      "potential_issues": ["YAML se_reduction is not forwarded to build_model."]
+      "parameter_count": null,
+      "status": "architecture active; direct EMD runner is data-asset blocked"
     },
     {
-      "name": "xResNet1D101 + EMD late fusion",
-      "class_name": "CBAMXResNet1DLateFusion(input_mode=late_fusion,use_cbam=False)",
-      "definition_file": "code/models/cbam_xresnet1d.py:83-203",
-      "training_entry": "code/run_ablation_study.py:529-634",
-      "config": "configs/ablation_cbam_emd.yaml; EXPERIMENTS.xresnet1d101_emd_late_fusion",
-      "input_shapes": {"ecg": "[B,12,T]", "emd": "[B,12,11] default", "output_logits": "[B,5]"},
-      "backbone": {"name": "XResNet1d101", "embedding": 512},
-      "attention": {"type": "none"},
-      "feature_branch": {"type": "EMD MLP", "flow": "Flatten(132)->LayerNorm->Linear(132,256)->ReLU->Dropout(.3)->Linear(256,128)->ReLU", "embedding": 128},
-      "fusion": {"default": "concat", "input": 640, "head": "Linear(640,256)->ReLU->Dropout(.4)->Linear(256,5)", "gated_option": "sigmoid Linear(640,640) scale"},
-      "classifier": "fusion head output logits",
-      "parameter_count": {"status": "unavailable locally: torch missing"},
-      "training_config": {"emd_standardization": "fit training folds only", "loss": "BCEWithLogitsLoss"},
-      "potential_issues": ["No explicit ECG/EMD branch norm balancing before concat.", "12 leads and 12*F feature input are hard-coded."]
+      "name": "xResNet/CBAM/SE + EMD late fusion",
+      "implementation": "code/models/cbam_xresnet1d.py:83-234",
+      "training_entry": "code/run_ablation_study.py:30-50,510-558",
+      "configs": ["configs/ablation_cbam_emd.yaml", "configs/ablation_se.yaml"],
+      "inputs": {"ecg": "[B,12,T]", "emd": "[B,12,F], normally F=11"},
+      "backbone": {"variants": ["xResNet1D101", "CBAM-xResNet1D101", "SE-xResNet1D101"], "embedding_dim": 512},
+      "attention": "none, CBAM, or SE",
+      "feature_branch": {
+        "type": "EMD MLP",
+        "flow": "Flatten(12F) -> LayerNorm -> Linear(12F,256) -> ReLU -> Dropout(0.3) -> Linear(256,128) -> ReLU",
+        "embedding_dim": 128
+      },
+      "fusion": {
+        "configured": "concat",
+        "optional": "gated",
+        "concat_dim": 640,
+        "head": "Linear(640,256) -> ReLU -> Dropout(0.4) -> Linear(256,5)"
+      },
+      "classifier": "logits [B,5]",
+      "parameter_count": null,
+      "architecture_status": "implemented; random-tensor forward tests pass",
+      "data_workflow_status": "blocked",
+      "blocker": "configs/datasets.json:48-55 marks emd_features source_required; no active archive is registered"
     },
     {
-      "name": "CBAM-xResNet1D101 + EMD late fusion",
-      "class_name": "CBAMXResNet1DLateFusion(input_mode=late_fusion,use_cbam=True)",
-      "definition_file": "code/models/cbam_xresnet1d.py:7-34,56-80,83-203",
-      "training_entry": "code/run_ablation_study.py:529-634",
-      "config": "configs/ablation_cbam_emd.yaml; EXPERIMENTS.cbam_xresnet1d101_emd_late_fusion",
-      "input_shapes": {"ecg": "[B,12,T]", "emd": "[B,12,11] default", "output_logits": "[B,5]"},
-      "backbone": {"name": "CBAM XResNet1d101", "embedding": 512},
-      "attention": {"type": "CBAM", "channel_reduction": 16, "temporal_kernel": 7},
-      "feature_branch": {"type": "EMD MLP", "embedding": 128},
-      "fusion": {"type": "concat", "dimension": 640, "head_hidden": 256},
-      "classifier": "Linear(256,5), logits",
-      "parameter_count": {"status": "unavailable locally: torch missing"},
-      "training_config": {"loss": "BCEWithLogitsLoss", "optimizer": "Adam", "epochs": 50},
-      "potential_issues": ["Gated fusion exists in class but active experiment selects concat only."]
+      "name": "xResNet1D101 + Wavelet late fusion",
+      "implementation": "code/models/wavelet_late_fusion.py:8-68,99-117",
+      "training_entry": "code/run_wavelet_ablation_study.py:339-405",
+      "config": "configs/ablation_cbam_wavelet.yaml",
+      "experiment": "xresnet1d101_wavelet_late_fusion",
+      "inputs": {"ecg": "[B,12,1000]", "wavelet": "[B,12,6]"},
+      "backbone": {"name": "xResNet1D101", "embedding_dim": 512},
+      "attention": "none",
+      "feature_branch": {
+        "type": "WaveletFeatureEncoder",
+        "flow": "Flatten(72) -> Linear(72,256) -> LayerNorm -> GELU -> Dropout(0.2) -> Linear(256,128) -> LayerNorm -> GELU",
+        "embedding_dim": 128
+      },
+      "fusion": {"type": "concat", "concat_dim": 640, "head": "Linear(640,256) -> GELU -> Dropout(0.2) -> Linear(256,5)"},
+      "classifier": "logits [B,5]",
+      "parameter_count": null,
+      "status": "implemented and wired to the Wavelet runner"
     },
     {
-      "name": "SE-xResNet1D101 + EMD late fusion",
-      "class_name": "CBAMXResNet1DLateFusion(input_mode=late_fusion,use_se=True)",
-      "definition_file": "code/models/cbam_xresnet1d.py:37-53,56-80,83-203",
-      "training_entry": "code/run_ablation_study.py:529-634",
-      "config": "configs/ablation_se.yaml; EXPERIMENTS.se_xresnet1d101_emd_late_fusion",
-      "input_shapes": {"ecg": "[B,12,T]", "emd": "[B,12,11] default", "output_logits": "[B,5]"},
-      "backbone": {"name": "SE XResNet1d101", "embedding": 512},
-      "attention": {"type": "SE", "reduction": 16},
-      "feature_branch": {"type": "EMD MLP", "embedding": 128},
-      "fusion": {"type": "concat", "dimension": 640, "head_hidden": 256},
-      "classifier": "Linear(256,5), logits",
-      "parameter_count": {"status": "unavailable locally: torch missing"},
-      "training_config": {"loss": "BCEWithLogitsLoss"},
-      "potential_issues": ["Configured se_reduction has no effect beyond default model reduction."]
+      "name": "CBAM-xResNet1D101 + Wavelet late fusion",
+      "implementation": "code/models/wavelet_late_fusion.py:8-68,99-117",
+      "training_entry": "code/run_wavelet_ablation_study.py:339-405",
+      "config": "configs/ablation_cbam_wavelet.yaml",
+      "experiment": "cbam_xresnet1d101_wavelet_late_fusion",
+      "inputs": {"ecg": "[B,12,1000]", "wavelet": "[B,12,6]"},
+      "backbone": {"name": "CBAM-xResNet1D101", "embedding_dim": 512},
+      "attention": {"type": "CBAM", "location": "each residual branch before addition"},
+      "feature_branch": {"type": "WaveletFeatureEncoder", "input_dim": 72, "embedding_dim": 128},
+      "fusion": {"type": "concat", "concat_dim": 640, "head_hidden_dim": 256},
+      "classifier": "logits [B,5]",
+      "parameter_count": null,
+      "status": "implemented and wired to the Wavelet runner"
     },
     {
-      "name": "Original raw-waveform benchmark family",
-      "class_name": "xresnet1d101, resnet1d_wang, RNN1d LSTM, RNN1d bidirectional LSTM, fcn_wang, inception1d",
-      "definition_file": "code/models/original_model_factory.py:10-70; code/models/xresnet1d.py; code/models/resnet1d.py; code/models/rnn1d.py; code/models/basic_conv1d.py; code/models/inception1d.py",
-      "training_entry": "code/run_original_models_benchmark.py:744-879",
-      "config": "CLI --models; BENCHMARK_MODEL_NAMES",
-      "input_shapes": {"ecg": "[B,12,250] crop", "output_logits": "[B,5]"},
-      "backbone": {"variants": ["xResNet101", "Wang ResNet", "LSTM", "BiLSTM", "FCN-Wang", "InceptionTime-style"]},
-      "attention": {"type": "none in configured benchmark variants"},
+      "name": "SE-xResNet1D101 + Wavelet late fusion",
+      "implementation": "code/models/se_wavelet_late_fusion.py:8-80",
+      "declared_config": "configs/ablation_se_wavelet.yaml:57-61",
+      "inputs": {"ecg": "[B,12,1000]", "wavelet": "[B,12,6]"},
+      "backbone": {"name": "SE-xResNet1D101", "embedding_dim": 512},
+      "attention": {"type": "SE", "location": "each residual branch before addition"},
+      "feature_branch": {
+        "type": "WaveletFeatureEncoder",
+        "flow": "Flatten(72) -> Linear(72,256) -> LayerNorm -> GELU -> Dropout(0.2) -> Linear(256,128) -> LayerNorm -> GELU",
+        "embedding_dim": 128
+      },
+      "fusion": {"type": "concat", "concat_dim": 640, "head": "Linear(640,256) -> GELU -> Dropout(0.2) -> Linear(256,5)"},
+      "classifier": "logits [B,5]",
+      "parameter_count": null,
+      "architecture_status": "implemented; direct finite dummy forward passed",
+      "runner_status": "not wired",
+      "runner_gap": "run_wavelet_ablation_study.py imports only wavelet_late_fusion and its EXPERIMENTS rejects se_xresnet1d101 and se_xresnet1d101_wavelet_late_fusion"
+    },
+    {
+      "name": "Original six raw-waveform models",
+      "canonical_names": ["xresnet1d101", "resnet1d_wang", "lstm", "lstm_bidir", "fcn_wang", "inception1d"],
+      "catalog": "code/models/original_model_catalog.py:3-10,31-33",
+      "factory": "code/models/original_model_factory.py:14-45",
+      "training_entry": "code/run_original_models_benchmark.py:896-963",
+      "taskmanager_support": true,
+      "inputs": {"ecg": "[B,12,250]"},
+      "outputs": "finite logits [B,5] verified for every raw model",
+      "backbones": ["xResNet1D101", "Wang ResNet1D", "LSTM", "BiLSTM", "FCN-Wang", "Inception1D"],
       "feature_branch": null,
       "fusion": null,
-      "classifier": "model-specific pooled/sequence embedding -> 128-unit/dropout .5 head for raw factory models",
-      "parameter_count": {"status": "unavailable locally: torch missing"},
-      "training_config": {"loss": "BCEWithLogitsLoss", "optimizer": "Adam", "scheduler": "OneCycleLR", "epochs": 50, "default_batch_size": 128, "Colab_runner_batch_size": 256},
-      "potential_issues": ["Random crop selection excludes the final valid crop start."]
+      "parameter_count": null,
+      "training": {"loss": "BCEWithLogitsLoss", "optimizer": "Adam", "scheduler": "OneCycleLR", "default_epochs": 50, "default_batch_size": 128}
     },
     {
-      "name": "Wavelet + NN",
-      "class_name": "Keras Sequential model from build_wavelet_nn",
-      "definition_file": "code/models/original_model_factory.py:73-88; code/models/wavelet.py:27-77",
-      "training_entry": "code/run_original_models_benchmark.py:558-747",
-      "config": "WAVELET_EPOCHS=30, WAVELET_BATCH_SIZE=128",
-      "input_shapes": {"wavelet_features": "[B,864]", "output_probabilities": "[B,5]"},
-      "backbone": {"type": "db6 level-5 handcrafted feature extraction"},
-      "attention": {"type": "none"},
-      "feature_branch": {"type": "feature-only", "standardization": "StandardScaler fit on clean train"},
+      "name": "Original Wavelet+NN",
+      "canonical_name": "wavelet_nn",
+      "catalog": "code/models/original_model_catalog.py:12-28",
+      "factory": "code/models/original_model_factory.py:48-63",
+      "feature_extraction": "code/models/wavelet.py:27-77",
+      "training_entry": "code/run_original_models_benchmark.py:801-895",
+      "taskmanager_support": true,
+      "inputs": {"wavelet_features": "[B,864]"},
+      "backbone": "db6 level-5 handcrafted feature extraction",
+      "feature_branch": "feature-only StandardScaler fitted on clean training folds",
       "fusion": null,
-      "classifier": "Dense(864,128,relu)->Dropout(.25)->Dense(128,5,sigmoid)",
-      "parameter_count": {"status": "unavailable locally: TensorFlow not installed"},
-      "training_config": {"loss": "binary_crossentropy", "optimizer": "Adamax", "epochs": 30, "batch_size": 128},
-      "potential_issues": ["Not a Wavelet late-fusion model.", "Legacy extractor defaults to Pool(18)."]
+      "classifier": "Dense(864,128,relu) -> Dropout(0.25) -> Dense(128,5,sigmoid)",
+      "outputs": "probabilities [B,5]",
+      "parameter_count": null,
+      "training": {"loss": "binary_crossentropy", "optimizer": "Adamax", "default_epochs": 30, "default_batch_size": 128, "overrides": ["--wavelet-epochs", "--wavelet-batch-size", "taskmanager YAML"]},
+      "status": "feature-only original benchmark model; separate from Wavelet late fusion"
     },
     {
       "name": "Legacy FastAI configurable family",
-      "class_name": "fastai_model",
-      "definition_file": "code/models/fastai_model.py:159-420",
-      "training_entry": "code/experiments/scp_experiment.py:120-176",
+      "implementation": "code/models/fastai_model.py:159-420",
+      "dispatcher": "code/experiments/scp_experiment.py",
       "config": "code/configs/fastai_configs.py",
-      "input_shapes": {"ecg": "cropped ECG, channels-first at model boundary", "output": "model logits"},
-      "backbone": {"variants": ["ResNet", "xResNet", "Inception", "FCN/basic/SE CNN", "LSTM", "GRU"]},
-      "attention": {"type": "variant-dependent"},
-      "feature_branch": null,
-      "fusion": null,
-      "classifier": "builder-dependent",
-      "parameter_count": {"status": "unavailable locally: fastai/torch missing"},
-      "training_config": {"loss": "BCE-with-logits", "scheduler": "FastAI one-cycle"},
-      "potential_issues": ["Unknown modeltype silently breaks dispatcher."]
+      "backbones": ["ResNet", "xResNet", "Inception", "FCN/basic/SE CNN", "LSTM", "GRU"],
+      "parameter_count": null,
+      "status": "legacy direct path; not taskmanager-orchestrated"
     },
     {
       "name": "Lightning checkpoint reconstruction family",
-      "class_name": "checkpoint-compatible LeNet/LSTM/ResNet/Inception/xResNet modules",
-      "definition_file": "code/models/lightning_checkpoint_models.py:18-313",
-      "training_entry": "none; inference loaders only",
-      "config": "checkpoint architecture argument",
-      "input_shapes": {"ecg": "[B,12,T]", "output_logits": "[B,num_classes]"},
-      "backbone": {"variants": ["LeNet", "BiLSTM", "ResNet", "Inception", "xResNet"]},
-      "attention": {"type": "variant-dependent"},
-      "feature_branch": null,
-      "fusion": null,
-      "classifier": "checkpoint-compatible",
-      "parameter_count": {"status": "unavailable locally: torch missing"},
-      "training_config": {},
-      "potential_issues": ["No LightningModule training implementation found; these are inference reconstructions."]
+      "implementation": "code/models/lightning_checkpoint_models.py:18-313",
+      "inference_entry": "code/run_lightning_inference.py",
+      "backbones": ["LeNet", "BiLSTM", "ResNet", "Inception", "xResNet"],
+      "parameter_count": null,
+      "status": "inference-only reconstruction; no Lightning training module found"
     }
   ],
-  "not_implemented_as_trainable_models": ["Transformer", "CNN-LSTM", "Wavelet late fusion", "Time-domain feature late fusion"],
-  "placeholder_or_legacy": ["code/models/your_model.py", "code/configs/your_configs.py", "legacy CBAM ecg_only/feature_only configs", "checkpoint reconstruction modules"],
-  "static_issues": [
-    "SE reduction YAML is not forwarded into active ablation model construction.",
-    "Several ablation YAML optimizer/loss/monitor options are not used by the hard-coded loop.",
-    "Ablation completion check is hard-coded to 50 epochs.",
-    "Waveform-only ablations still require EMD asset loading.",
-    "Legacy dispatcher silently stops for unknown model types.",
-    "Original benchmark random crops omit the last possible crop start."
+  "data_workflows": {
+    "emd": {
+      "architecture_exists": true,
+      "dummy_forward_passes": true,
+      "status": "blocked",
+      "blocker_source": "configs/datasets.json:48-55",
+      "reason": "The required 11-feature-per-lead EMD archive is source_required and has no active source.",
+      "prohibited_substitutions": ["Wavelet archive", "time-domain archive", "clean-only or incomplete EMD scenarios"]
+    },
+    "wavelet_late_fusion": {
+      "architecture_exists": true,
+      "canonical_archive_registered": true,
+      "baseline_cbam_runner_wired": true,
+      "se_runner_wired": false
+    }
+  },
+  "not_implemented_as_trainable_models": [
+    "Transformer",
+    "CNN-LSTM",
+    "time-domain feature late fusion"
+  ],
+  "known_wiring_or_static_risks": [
+    "configs/ablation_se_wavelet.yaml declares SE experiment names that run_wavelet_ablation_study.py does not accept or build.",
+    "run_ablation_study.py loads EMD before experiment selection, so its ECG-only variants are blocked by the missing EMD asset.",
+    "run_ablation_study.experiment_complete checks for 50 history rows instead of config['epochs'].",
+    "The original Wavelet extractor defaults to multiprocessing.Pool(18)."
   ]
 }

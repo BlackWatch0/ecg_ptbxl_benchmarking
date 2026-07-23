@@ -1,0 +1,18 @@
+version: 1
+
+# 此目录只保存 taskmanager 自身的准备任务状态和日志。
+output_dir: ../../results/original_data_prepare
+
+tasks:
+  - name: prepare
+    type: prepare_data
+    options:
+      # 归档必须先下载到本地；taskmanager 不访问 Google Drive 或 S3。
+      archive:
+        - ../../data/archives/ptb-xl-1.0.3.zip
+        - ../../data/archives/ptbxl_original_database_plus_mixed_WFDB.tar
+        - ../../data/archives/denoised_WFDB.tar
+      search_root:
+        - ../../data
+      workspace: ../../data/prepared
+      output_dir: ../../data/normalized
