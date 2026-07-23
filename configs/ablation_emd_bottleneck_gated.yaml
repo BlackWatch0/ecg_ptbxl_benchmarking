@@ -1,0 +1,22 @@
+task: superdiagnostic
+num_classes: 5
+class_names: [NORM, MI, STTC, CD, HYP]
+epochs: 50
+batch_size: 128
+learning_rate: 0.01
+weight_decay: 0.01
+optimizer: Adam
+loss: BCEWithLogitsLoss
+monitor: valid_loss
+save_best_only: true
+threshold_search: true
+seeds: [42]
+snr_levels: [clean, 24, 12, 6, 0, -6]
+mixed_precision: true
+data_root: data
+output_dir: results/ablation_emd_bottleneck_gated
+experiments:
+  - cbam_xresnet1d101_emd_late_fusion_emb32_gated
+  - cbam_xresnet1d101_emd_late_fusion_emb64_gated
+  - emd_only_mlp_emb32
+  - emd_only_mlp_emb64

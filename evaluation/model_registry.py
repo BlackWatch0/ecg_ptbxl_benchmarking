@@ -480,14 +480,25 @@ _CBAM_VARIANTS: Dict[str, Dict[str, Any]] = {
     "cbam_emd_concat": {"use_cbam": True, "use_se": False, "input_mode": "late_fusion",
                         "fusion_type": "concat"},
     "cbam_emd_gated": {"use_cbam": True, "use_se": False, "input_mode": "late_fusion",
-                        "fusion_type": "gated"},
+                         "fusion_type": "gated"},
+    "cbam_emd_bottleneck_gated_emb32": {"use_cbam": True, "use_se": False,
+                                          "model_variant": "emd_bottleneck_gated",
+                                          "emd_embedding_dim": 32},
+    "cbam_emd_bottleneck_gated_emb64": {"use_cbam": True, "use_se": False,
+                                          "model_variant": "emd_bottleneck_gated",
+                                          "emd_embedding_dim": 64},
+    "emd_only_bottleneck_emb32": {"use_cbam": False, "use_se": False,
+                                    "model_variant": "emd_only_bottleneck",
+                                    "emd_embedding_dim": 32},
+    "emd_only_bottleneck_emb64": {"use_cbam": False, "use_se": False,
+                                    "model_variant": "emd_only_bottleneck",
+                                    "emd_embedding_dim": 64},
     "se_emd_concat": {"use_cbam": False, "use_se": True,
                        "input_mode": "late_fusion", "fusion_type": "concat"},
 }
 
 
 def _build_cbam(config: ModelConfig, device: str) -> ModelAdapter:
-    factory = _import_symbol(config.factory or "models.cbam_xresnet1d:cbam_xresnet1d101")
     variant = (config.variant or "cbam").lower()
     if variant not in _CBAM_VARIANTS:
         raise ValueError("Unknown CBAM variant {!r}; expected {}".format(
@@ -496,9 +507,16 @@ def _build_cbam(config: ModelConfig, device: str) -> ModelAdapter:
     kwargs.update(config.kwargs)
     kwargs.setdefault("num_classes", config.num_classes)
     kwargs.setdefault("input_channels", config.input_channels)
-    input_mode = kwargs.get("input_mode")
-    call_mode = input_mode if input_mode in ("late_fusion", "feature_only") else "single"
-    return TorchModelAdapter(factory(**kwargs), config, device, call_mode=call_mode)
+    if "model_variant" in kwargs:
+        factory = _import_symbol(config.factory or "models.cbam_xresnet1d:build_model")
+        model = factory("xresnet1d101", **kwargs)
+        call_mode = "feature_only" if kwargs["model_variant"] == "emd_only_bottleneck" else "late_fusion"
+    else:
+        factory = _import_symbol(config.factory or "models.cbam_xresnet1d:cbam_xresnet1d101")
+        model = factory(**kwargs)
+        input_mode = kwargs.get("input_mode")
+        call_mode = input_mode if input_mode in ("late_fusion", "feature_only") else "single"
+    return TorchModelAdapter(model, config, device, call_mode=call_mode)
 
 
 def _build_factory(config: ModelConfig, device: str) -> ModelAdapter:
