@@ -1,281 +1,289 @@
 # Model Architecture Summary
 
-Generated from a static repository inspection on 2026-07-21. Paths below are repository-relative. No dataset was loaded and no training was started. Dummy forward tests were attempted conceptually but not run because the local analysis environment has no `torch` (`ModuleNotFoundError: No module named 'torch'`); no large dependency was installed.
+Inspected against the current repository on 2026-07-23. Paths and line ranges are
+repository-relative. No dataset was loaded and no training was started. Parameter
+counts are intentionally not reported because this inventory did not measure and
+persist them.
 
-## Overview
+## Verification Record
 
-| Model name | Backbone | Attention | Feature branch | Fusion | ECG embedding | Feature embedding | Parameter count | Code status |
-| --- | --- | --- | --- | --- | ---: | ---: | ---: | --- |
-| xResNet1D101 baseline | xResNet-101 | none | none | none | 512 in current ablation implementation | - | unavailable locally | active ablation variant |
-| CBAM-xResNet1D101 | xResNet-101 | CBAM | none | none | 512 | - | unavailable locally | active ablation variant |
-| SE-xResNet1D101 | xResNet-101 | SE | none | none | 512 | - | unavailable locally | active ablation variant |
-| xResNet1D101 + EMD | xResNet-101 | none | EMD MLP | concat or gated | 512 | 128 | unavailable locally | active concat variant |
-| CBAM-xResNet1D101 + EMD | xResNet-101 | CBAM | EMD MLP | concat or gated | 512 | 128 | unavailable locally | active concat variant |
-| SE-xResNet1D101 + EMD | xResNet-101 | SE | EMD MLP | concat or gated | 512 | 128 | unavailable locally | active concat variant |
-| Original xResNet1D101 | xResNet-101 | implementation-dependent hooks only | none | none | classifier head input from backbone pool | - | unavailable locally | active original benchmark |
-| Wang ResNet1D | 3-stage Wang ResNet | none | none | none | pooled convolutional features | - | unavailable locally | active original benchmark |
-| LSTM / BiLSTM | 2-layer recurrent | temporal max/mean/state pooling | none | none | 768 / 1536 | - | unavailable locally | active original benchmark |
-| FCN-Wang | 3-layer FCN | none | none | none | pooled convolutional features | - | unavailable locally | active original benchmark |
-| Inception1D | InceptionTime-style | residual shortcuts, not attention | none | none | pooled inception features | - | unavailable locally | active original benchmark |
-| Wavelet+NN | handcrafted db6 features + Keras MLP | none | Wavelet statistics | feature-only | - | 864 input / 128 hidden | unavailable locally | active original benchmark |
-| Legacy FastAI configurable family | xResNet/ResNet/Inception/FCN/RNN builders | model-dependent | none | none | model-dependent | - | unavailable locally | active legacy dispatcher |
-| Lightning checkpoint reconstructions | LeNet/LSTM/ResNet/Inception/xResNet | model-dependent | none | none | model-dependent | - | unavailable locally | inference-only reconstruction |
+- Environment: Python 3.13.12, PyTorch 2.12.1+cpu, pytest 9.1.1.
+- Existing model forward/factory tests:
+  `python -m pytest -q tests/test_ablation_factory.py tests/test_cbam_xresnet1d.py tests/test_se_xresnet1d.py tests/test_original_models_benchmark.py::test_original_model_factory_forward tests/test_original_models_benchmark.py::test_wavelet_alias_uses_feature_factory tests/test_original_models_benchmark.py::test_wavelet_factory_preserves_original_architecture`
+- Result: 14 passed, 4 PyTorch `torch.jit.script` deprecation warnings, 7.46 seconds.
+- The selected tests use random tensors or a mocked TensorFlow API. They do not load
+  PTB-XL and do not run a training loop.
+- The repository has no pytest for `wavelet_late_fusion.py` or
+  `se_wavelet_late_fusion.py`. A separate `eval()`/`torch.no_grad()` dummy forward
+  used ECG `[1,12,1000]` and Wavelet `[1,12,6]`; xResNet, CBAM, and SE ECG-only
+  variants and their three Wavelet-fusion counterparts all returned finite `[1,5]`
+  logits.
 
-All classification paths are multi-label ECG classification where their active configurations use `BCEWithLogitsLoss` or Keras binary cross-entropy. The active CBAM/EMD and original benchmark tasks use five superdiagnostic classes: `NORM`, `MI`, `STTC`, `CD`, `HYP`.
+## Current Entry Points and Scope
 
-## Shared Input Conventions
+- The canonical unified orchestrator is `taskmanager.py:1-15`. It delegates to
+  `code/task_manager/` and only orchestrates the seven original benchmark models.
+- The canonical original-model names and aliases are defined in
+  `code/models/original_model_catalog.py:3-33`. `BENCHMARK_MODEL_NAMES` is the six
+  raw-waveform names plus `wavelet_nn` (`:3-14`).
+- Model construction remains in `code/models/original_model_factory.py:14-63`.
+  `code/task_manager/models.py:1-5` imports the catalog, while
+  `code/task_manager/runner.py` maps prepare/train/evaluate/report/package to
+  the existing Python runners.
+- `configs/taskmanager/original_models_benchmark.yaml:21-54` selects exactly
+  `xresnet1d101`, `resnet1d_wang`, `lstm`, `lstm_bidir`, `fcn_wang`, `inception1d`,
+  and `wavelet_nn`.
+- Attention, EMD, Wavelet late-fusion, unified evaluation, and legacy inference
+  retain direct Python entries; they are not taskmanager model types.
+- Shell launchers are historical files under `scripts/legacy/`. They are not a
+  current Bash entry and are not invoked by taskmanager.
 
-- Active ablation ECG input: `[batch, 12, length]`; 12 leads are enforced by `CBAMXResNet1DLateFusion._validate_ecg` in `code/models/cbam_xresnet1d.py:150-154`.
-- Active EMD input: `[batch, 12, features]`; current common EMD schema contains 11 features/lead, thus the default tensor is `[B, 12, 11]`. Evidence: `code/utils/emd_features.py:8-14`, `code/models/cbam_xresnet1d.py:156-160`.
-- Legacy/ablation ECG sampling rate is 100 Hz. The legacy CBAM configuration uses 10-second, 1,000-sample inputs: `code/configs/cbam_configs.py:11-35`.
-- Original benchmark raw models receive crop tensors `[B, 12, 250]`; validation/test crops use stride 125: `code/run_original_models_benchmark.py:36-41,317-321`.
-- Original benchmark Wavelet+NN consumes `[B, 864]` (`12 leads * 6 db6 coefficient groups * 12 statistics`): `code/run_original_models_benchmark.py:38-41`.
+## Architecture Overview
 
-## 1. xResNet1D101 Baseline, CBAM, and SE Variants
+| Model or family | ECG input | Feature input | Attention | Fusion/output | Current status |
+| --- | --- | --- | --- | --- | --- |
+| xResNet1D101 baseline | `[B,12,T]` | none | none | 512-D ECG embedding -> logits | architecture active; EMD runner currently asset-blocked |
+| CBAM-xResNet1D101 | `[B,12,T]` | none | CBAM in residual blocks | 512-D ECG embedding -> logits | architecture active; EMD runner currently asset-blocked |
+| SE-xResNet1D101 | `[B,12,T]` | none | SE in residual blocks | 512-D ECG embedding -> logits | architecture active; EMD runner currently asset-blocked |
+| xResNet/CBAM/SE + EMD | `[B,12,T]` | `[B,12,F]`, normally `F=11` | variant-dependent | 512-D ECG + 128-D EMD; concat or gated -> logits | architecture exists and dummy forward passes; data workflow blocked |
+| xResNet + Wavelet | `[B,12,1000]` | `[B,12,6]` | none | 512-D ECG + 128-D Wavelet; concat -> logits | implemented and wired to Wavelet runner |
+| CBAM-xResNet + Wavelet | `[B,12,1000]` | `[B,12,6]` | CBAM | 512-D ECG + 128-D Wavelet; concat -> logits | implemented and wired to Wavelet runner |
+| SE-xResNet + Wavelet | `[B,12,1000]` | `[B,12,6]` | SE | 512-D ECG + 128-D Wavelet; concat -> logits | architecture/config exist; not wired to current Wavelet runner |
+| Six original raw models | `[B,12,250]` | none | model-dependent hooks only | model-specific logits `[B,5]` | taskmanager-supported |
+| Original Wavelet+NN | none at classifier boundary | `[B,864]` | none | feature-only Keras probabilities `[B,5]` | taskmanager-supported |
+| Legacy FastAI family | cropped ECG | none or legacy EMD pair | model-dependent | model-dependent logits | legacy direct path |
+| Lightning reconstructions | `[B,12,T]` | none | model-dependent | checkpoint-compatible logits | inference only |
 
-**Basic information**
+The fixed superdiagnostic class order is `NORM, MI, STTC, CD, HYP`. PyTorch
+training paths produce logits for `BCEWithLogitsLoss`; the original Keras
+Wavelet+NN includes sigmoid and produces probabilities.
 
-- Shared class: `CBAMXResNet1DLateFusion`; definition: `code/models/cbam_xresnet1d.py:83-203`.
-- Builder: `build_model('xresnet1d101', ...)`, `code/models/cbam_xresnet1d.py:206-224`.
-- Current training entry: `code/run_ablation_study.py:529-634`.
-- Variants are declared in `code/run_ablation_study.py:33-40`: `xresnet1d101_baseline`, `cbam_xresnet1d101`, and `se_xresnet1d101`.
-- Configs: `configs/ablation_cbam_emd.yaml`, `configs/ablation_se.yaml`.
-- Static construction status: constructible by code path; local forward was not executed because `torch` is unavailable.
+## 1. Shared xResNet, CBAM, SE, and EMD Architecture
 
-**Input/output**
+### Definition and flow
 
-```text
-ECG input: [B, 12, T]
-Feature input: none for ECG-only variants
-Output logits: [B, 5] in active ablations
-```
-
-**Backbone and classifier data flow**
-
-```text
-ECG
--> XResNet1d stem: Conv1d/BN/ReLU stack (32, 32, 64) + max pool
--> residual stages with xResNet-101 layers (3, 4, 23, 3), expansion 4
--> final feature map
--> temporal max pool and temporal mean pool
--> concat ECG embedding [B, 512]
--> Linear(512, 5) for ECG-only mode
-```
-
-The underlying stem, residual construction, adaptive pooling and classifier implementation are in `code/models/xresnet1d.py:97-191`. The fusion wrapper deliberately removes the original xResNet classifier (`list(backbone.children())[:-1]`) and computes max+mean pooling itself: `code/models/cbam_xresnet1d.py:106-116,164-170`.
-
-**Attention**
-
-- CBAM is inserted inside every `CBAMResBlock`, after the residual convolution path and before residual addition: `code/models/cbam_xresnet1d.py:56-80`.
-- Channel attention: temporal average and maximum pooling, shared 1x1 Conv MLP, ReLU, sigmoid; default reduction 16: `:7-20`.
-- Temporal attention: channel average and maximum maps, concatenation, `Conv1d(2,1,kernel=7)`, sigmoid: `:23-34`.
-- SE is mutually exclusive with CBAM. It uses adaptive global temporal pooling and 1x1 Conv/ReLU/Conv/sigmoid scale, default reduction 16: `:37-53,63-71`.
-
-**Training**
-
-- `BCEWithLogitsLoss`, Adam, OneCycleLR, AMP when CUDA available: `code/run_ablation_study.py:333-380`.
-- YAML defaults: 50 epochs, batch 128, LR .01, weight decay .01, seed 42: `configs/ablation_cbam_emd.yaml:1-22`.
-- Best checkpoint is selected by validation BCE; last checkpoint is written every epoch: `code/run_ablation_study.py:397-406`.
-
-**Potential issues**
-
-- `se_reduction` is recorded in metadata but not passed into `build_model` from `run_ablation_study.py`; the model therefore uses its default 16 regardless of a different YAML value. Evidence: `code/run_ablation_study.py:529-545`, `code/models/cbam_xresnet1d.py:206-224`.
-- `early_stopping_patience`, `optimizer`, `loss`, `monitor`, and `save_best_only` in ablation YAML are declarative; the loop hard-codes Adam/BCE/best-valid-loss behavior and runs all epochs. Evidence: `run_ablation_study.py:333-407`.
-- All ablation selections load and align clean EMD before knowing whether a selected model uses EMD. A waveform-only baseline therefore still requires EMD assets: `run_ablation_study.py:193-207`.
-
-## 2. EMD Late-Fusion Variants
-
-**Basic information**
-
-- Shared implementation: `CBAMXResNet1DLateFusion`, `code/models/cbam_xresnet1d.py:83-203`.
-- Active variants: `xresnet1d101_emd_late_fusion`, `cbam_xresnet1d101_emd_late_fusion`, `se_xresnet1d101_emd_late_fusion`: `code/run_ablation_study.py:37-39`.
-- Active configuration selects concat fusion; gated fusion is supported by the class but is not selected by that experiment dictionary.
-
-**Feature branch and fusion**
+- Shared class: `CBAMXResNet1DLateFusion`,
+  `code/models/cbam_xresnet1d.py:83-207`.
+- Builder: `build_model`, `code/models/cbam_xresnet1d.py:209-234`.
+- Experiment declarations: `code/run_ablation_study.py:30-50`.
+- Configs: `configs/ablation_cbam_emd.yaml` and `configs/ablation_se.yaml`.
 
 ```text
-EMD [B, 12, 11]
--> Flatten [B, 132]
--> LayerNorm(132)
--> Linear(132, 256)
--> ReLU
--> Dropout(0.3)
--> Linear(256, 128)
--> ReLU
--> EMD embedding [B, 128]
+ECG [B,12,T]
+-> xResNet stem
+-> residual stages (3,4,23,3), expansion 4
+-> temporal max pool + temporal mean pool
+-> ECG embedding [B,512]
 
-ECG [B, 12, T]
--> xResNet feature map
--> temporal max + mean concat
--> ECG embedding [B, 512]
+EMD [B,12,F]
+-> flatten [B,12F]
+-> LayerNorm(12F)
+-> Linear(12F,256) -> ReLU -> Dropout(0.3)
+-> Linear(256,128) -> ReLU
+-> EMD embedding [B,128]
 
-concat: [B, 640]
--> Linear(640, 256) -> ReLU -> Dropout(0.4)
--> Linear(256, 5) logits
+ECG-only: Linear(512,5) -> logits
+Feature-only: Linear(128,5) -> logits
+Late fusion: concat [B,640]
+-> optional sigmoid Linear(640,640) elementwise gate
+-> Linear(640,256) -> ReLU -> Dropout(0.4)
+-> Linear(256,5) -> logits
 ```
 
-Evidence: `code/models/cbam_xresnet1d.py:120-148,172-195`. In gated mode the same 640-D vector is multiplied elementwise by `sigmoid(Linear(640,640))` before the fusion MLP: `:139-142,184-185`.
+The ECG backbone construction and max/mean pooling are at
+`code/models/cbam_xresnet1d.py:106-118,164-170`. The EMD encoder and fusion head
+are at `:120-148,172-195`.
 
-The EMD standardizer is fit on training folds only and saved as `emd_scaler.npz`: `code/run_ablation_study.py:204-217`; `code/utils/emd_features.py:116-128`.
+### Attention
 
-**Potential issues**
+- CBAM channel and temporal attention are defined at
+  `code/models/cbam_xresnet1d.py:7-34` and applied to each residual branch before
+  residual addition at `:56-80`.
+- SE is defined at `code/models/cbam_xresnet1d.py:37-53` and is mutually exclusive
+  with CBAM. It is applied before residual addition at `:56-80`.
+- Defaults are CBAM reduction 16, temporal kernel 7, and SE reduction 16
+  (`:58-71,84-89`).
 
-- There is LayerNorm on flattened EMD features but no explicit branch norm matching ECG embedding scale before concat; branch dominance is possible and requires empirical diagnostics.
-- The 12-lead and `12 * emd_features` dimensions are hard-coded in the encoder and validator: `code/models/cbam_xresnet1d.py:123-124,156-160`.
-- `feature_dropout` is configurable in the class but not exposed by `build_model`'s named arguments; it can only arrive through `**kwargs`.
-- The class outputs logits, correctly leaving sigmoid to prediction/evaluation code. Do not apply sigmoid before `BCEWithLogitsLoss`.
+### Training and data status
 
-## 3. Original Benchmark Raw-Waveform Models
+- The direct ablation loop uses Adam, OneCycleLR, `BCEWithLogitsLoss`, optional
+  CUDA AMP, and validation-loss checkpoints:
+  `code/run_ablation_study.py:314-388`.
+- EMD is standardized using train-fold statistics and the scaler is saved:
+  `code/run_ablation_study.py:180-203`.
+- The EMD architecture is implemented and covered by current random-tensor tests.
+  The data workflow is nevertheless **blocked**: `configs/datasets.json:48-55`
+  records `emd_features` as `source_required`, with no active archive. The runner
+  requires the clean EMD file before any selected model is run
+  (`code/run_ablation_study.py:180-188`). Wavelet or time-domain archives must not
+  be substituted for the required 11-feature-per-lead EMD schema.
 
-**Factory and training entry**
+### Current risks
 
-- Factory: `code/models/original_model_factory.py:10-70`.
-- Active trainer: `code/run_original_models_benchmark.py:744-879,897-963`.
-- Models: `xresnet1d101`, `resnet1d_wang`, `lstm`, `lstm_bidir`, `fcn_wang`, `inception1d`.
-- Shared input/output: ECG crop `[B,12,250]` -> logits `[B,5]`; BCE-with-logits, Adam, OneCycleLR, mixed precision. The LSTM LR is `.001`; other raw models use `.01`: `code/models/original_model_factory.py:42-70`.
-- Current full Bash entry: `run_full_original_baseline_colab.sh`; it trains on clean folds 1-8, selects thresholds on fold 9, and evaluates fold 10 clean/noisy/denoised scenarios.
+- `run_ablation_study.py` loads EMD for the whole bundle before model selection,
+  so its ECG-only experiments are blocked by the missing EMD asset too.
+- `experiment_complete` checks for at least 50 history rows rather than
+  `config['epochs']`: `code/run_ablation_study.py:450-458`.
+- The class supports feature-only and gated EMD modes, but current experiment
+  declarations select ECG-only or concat late fusion only.
 
-### 3.1 Original xResNet1D101
+## 2. Wavelet Late-Fusion Architectures
 
-- Class/factory: `XResNet1d` / `xresnet1d101`, `code/models/xresnet1d.py:136-191`.
-- Flow: 3-convolution stem -> max pool -> bottleneck residual stages `(3,4,23,3)` -> adaptive max+average pool -> flattened head -> logits.
-- Original factory supplies a 128-unit classifier head and `.5` head dropout: `code/models/original_model_factory.py:46-70`.
+Wavelet late fusion is implemented. It is distinct from the original feature-only
+Wavelet+NN model.
 
-### 3.2 Wang ResNet1D
+### Baseline and CBAM Wavelet variants
 
-- Definition: `code/models/resnet1d.py:175-189`; factory mapping: `code/models/original_model_factory.py:51-53`.
-- Flow: three residual stages, each one block, 128 channels, no stem pooling -> shared adaptive max+average head -> logits.
+- Definitions and builder: `code/models/wavelet_late_fusion.py:8-117`.
+- `WaveletFeatureEncoder` validates `[B,12,6]`, flattens 72 values, and applies
+  `Linear(72,256) -> LayerNorm -> GELU -> Dropout(0.2) -> Linear(256,128) ->
+  LayerNorm -> GELU`: `:8-25`.
+- `WaveletLateFusionXResNet` validates ECG `[B,12,1000]`, pools the xResNet map to
+  a 512-D embedding, concatenates a 128-D Wavelet embedding, and applies
+  `Linear(640,256) -> GELU -> Dropout(0.2) -> Linear(256,5)`:
+  `:28-68`.
+- `ECGOnlyXResNet` provides matched baseline and CBAM ECG-only variants:
+  `:71-96`.
+- The builder permits only no-feature/`fusion_type='none'` or Wavelet
+  `[12,6]`/concat combinations: `:99-117`.
 
-### 3.3 LSTM and Bidirectional LSTM
+### SE Wavelet variants
 
-- Definition: `code/models/rnn1d.py:17-75`; factory: `code/models/original_model_factory.py:54-57`.
-- Flow: transpose `[B,C,T]` to `[B,T,C]` -> two-layer LSTM, hidden 256 -> temporal mean, temporal max, and terminal state concatenation -> MLP head -> logits.
-- Embedding dimensions are 768 unidirectional and 1536 bidirectional: `code/models/rnn1d.py:51-64`.
-- No transformer architecture is defined or configured in this repository.
+- Definition and builder: `code/models/se_wavelet_late_fusion.py:8-80`.
+- `SEWaveletLateFusionXResNet` uses the same fixed ECG and Wavelet shapes, 512-D
+  ECG embedding, 128-D feature embedding, and 640 -> 256 -> 5 concat head:
+  `:28-66`.
+- With `use_se=True`, `CBAMResBlock` is configured with SE enabled and CBAM
+  disabled: `:33-39`.
+- Its feature-branch dimensions and dropout are fixed rather than exposed through
+  the builder: `:8-20,42-49,69-80`.
 
-### 3.4 FCN-Wang
+### Runner and configuration wiring
 
-- Definition and factory: `code/models/basic_conv1d.py:125-188`.
-- Flow: Conv1d/BN/activation stages with channels `128 -> 256 -> 128` and kernels `8 -> 5 -> 3` -> adaptive max+average pooling -> configurable head -> logits.
-- No attention in this configured FCN variant.
+- Direct runner: `code/run_wavelet_ablation_study.py`.
+- The runner currently imports only `models.wavelet_late_fusion` and declares four
+  experiments: baseline, CBAM, baseline+Wavelet, and CBAM+Wavelet
+  (`code/run_wavelet_ablation_study.py:20-33`). It builds those models at
+  `:351-367`.
+- `configs/ablation_cbam_wavelet.yaml:54-58` matches those four names and is the
+  default config (`code/run_wavelet_ablation_study.py:51-61`).
+- `configs/ablation_se_wavelet.yaml:57-61` declares baseline, SE, baseline+Wavelet,
+  and SE+Wavelet. However, the current runner does not import
+  `se_wavelet_late_fusion.py`, and its `choices`/`EXPERIMENTS` reject the two SE
+  names. The SE architecture and config therefore exist, but that config is not
+  currently executable through `run_wavelet_ablation_study.py`.
+- The runner fits both ECG and Wavelet standardizers on train folds and reuses them
+  for validation/test: `code/run_wavelet_ablation_study.py:235-258`. It enforces
+  Wavelet ID alignment and stores features as `[N,12,6]`: `:247-266`.
+- Training uses Adam, OneCycleLR, BCE-with-logits, optional CUDA AMP, validation
+  loss selection, and configured early stopping: `:291-319`.
 
-### 3.5 Inception1D
+## 3. Original Seven-Model Benchmark
 
-- Definition: `code/models/inception1d.py:18-104`.
-- Flow: six Inception blocks; each block applies a 1x1 bottleneck then parallel temporal convolutions at three scales plus max-pool/1x1 branch -> concat/BN/ReLU. Residual shortcuts occur every three blocks -> concat-pool head -> logits.
-- Default block width is 32; kernel scales are derived from 40: `code/models/inception1d.py:45-86`.
+### Catalog, factory, and orchestration
 
-**Potential issues**
+- Canonical names/aliases: `code/models/original_model_catalog.py:3-33`.
+- PyTorch and Keras factories: `code/models/original_model_factory.py:14-63`.
+- Raw model runner: `code/run_original_models_benchmark.py:896-963`.
+- Wavelet+NN runner: `code/run_original_models_benchmark.py:801-895`.
+- Taskmanager model source: `code/task_manager/models.py:1-5`.
 
-- Random crop selection excludes the final valid crop start because it calls `randint(0, maximum - 1)`: `code/run_original_models_benchmark.py:70-73`.
-- The runner now writes raw-model history and `last_checkpoint.pth` atomically after every epoch: `code/run_original_models_benchmark.py:330-339,433-457`. This is a persistence property, not an architecture change.
+The six raw models receive crop tensors `[B,12,250]` and return logits `[B,5]`.
+Crop length and validation/test stride are 250 and 125
+(`code/run_original_models_benchmark.py:37-42`). The LSTM models default to LR
+0.001; other raw models default to LR 0.01
+(`code/models/original_model_factory.py:14-15`).
 
-## 4. Wavelet + NN
+### Raw model details
 
-**Basic information**
+- **xResNet1D101:** three-convolution stem, bottleneck stages `(3,4,23,3)`,
+  concat max/mean pooling, 128-unit head, dropout 0.5. Definition:
+  `code/models/xresnet1d.py:136-184`; factory: `original_model_factory.py:25-28`.
+- **Wang ResNet1D:** configured by `resnet1d_wang`,
+  `code/models/resnet1d.py:175-189`; factory: `original_model_factory.py:32-33`.
+- **LSTM/BiLSTM:** two recurrent layers, hidden size 256, temporal mean/max/state
+  pooling, then the shared head. The pooled dimensions are 768 and 1536:
+  `code/models/rnn1d.py:17-66`; factory: `original_model_factory.py:34-37`.
+- **FCN-Wang:** channels `128 -> 256 -> 128`, kernels `8 -> 5 -> 3`, pooled head:
+  `code/models/basic_conv1d.py:125-179`; factory: `original_model_factory.py:38-39`.
+- **Inception1D:** six parallel-branch Inception blocks with residual shortcuts
+  every three blocks, width 32, scales derived from kernel 40:
+  `code/models/inception1d.py:18-104`; factory: `original_model_factory.py:40-41`.
+
+The existing factory tests instantiated all six models and verified finite `[2,5]`
+outputs from random `[2,12,250]` tensors.
+
+### Original Wavelet+NN
+
+```text
+ECG waveform
+-> per-lead db6 level-5 decomposition
+-> six coefficient groups * 12 statistics * 12 leads
+-> feature vector [B,864]
+-> train-fitted StandardScaler
+-> Dense(864,128,ReLU)
+-> Dropout(0.25)
+-> Dense(128,5,sigmoid)
+```
 
 - Feature extraction: `code/models/wavelet.py:27-77`.
-- Keras model factory: `code/models/original_model_factory.py:73-88`.
-- Active benchmark path: `code/run_original_models_benchmark.py:558-747`.
+- Keras factory: `code/models/original_model_factory.py:48-63`.
+- Defaults: `code/run_original_models_benchmark.py:40-42` (30 epochs, batch 128),
+  overridable through `--wavelet-epochs` and `--wavelet-batch-size` or taskmanager YAML.
+- This model is feature-only. It does not negate or replace the separately
+  implemented Wavelet+ECG late-fusion models.
+- The legacy extractor defaults to `multiprocessing.Pool(18)`:
+  `code/models/wavelet.py:68-77`.
+
+## 4. Legacy and Inference-Only Families
+
+- **Legacy FastAI dispatcher:** `code/models/fastai_model.py:159-420`, configured
+  by `code/configs/fastai_configs.py` and dispatched by
+  `code/experiments/scp_experiment.py`. It includes xResNet, ResNet, Inception,
+  FCN/basic/SE CNN, LSTM, and GRU builders.
+- **Legacy paired CBAM/EMD wrapper:**
+  `code/models/cbam_xresnet1d_model.py`; it adapts paired ECG/EMD inputs to the
+  FastAI v1 path. Its data workflow is subject to the same EMD asset block.
+- **Lightning checkpoint reconstructions:**
+  `code/models/lightning_checkpoint_models.py:18-313`, loaded by
+  `code/run_lightning_inference.py`. They reconstruct LeNet, BiLSTM, ResNet,
+  Inception, and xResNet checkpoints; no Lightning training module is present.
+
+## Not Implemented as Trainable Fusion Models
+
+- Transformer and CNN-LSTM architectures have no class, builder, config, or
+  training entry in the current repository.
+- Time-domain robustness code is analysis, not a neural late-fusion branch.
+- Wavelet late fusion must not appear in this list: it is implemented in
+  `wavelet_late_fusion.py` and `se_wavelet_late_fusion.py`.
+
+## Trace Mapping
 
 ```text
-ECG [B, 12, T]
--> db6 level-5 decomposition per lead
--> entropy/statistics/crossings for six coefficient groups
--> Wavelet vector [B, 864]
--> StandardScaler fit on clean training folds only
--> Dense(864, 128, ReLU)
--> Dropout(0.25)
--> Dense(128, 5, sigmoid)
-```
-
-- Keras uses Adamax and binary cross-entropy, 30 epochs, batch 128: `code/run_original_models_benchmark.py:909-919`; `code/models/original_model_factory.py:73-88`.
-- Unlike PyTorch models, the Keras output is probabilities because sigmoid is inside the final Dense layer.
-- Last and best Keras models plus CSV history are checkpointed each epoch: `code/run_original_models_benchmark.py:599-628`.
-
-**Potential issues**
-
-- Legacy `WaveletModel.get_ecg_features` defaults to `multiprocessing.Pool(18)`, which is resource-rigid: `code/models/wavelet.py:68-77`.
-- This is feature-only classification, not Wavelet late fusion. No Wavelet+ECG fusion model is implemented.
-
-## 5. Legacy FastAI Configurable Family
-
-- Definition/dispatcher: `code/models/fastai_model.py:159-420`; training dispatch: `code/experiments/scp_experiment.py:120-176`.
-- Name prefixes route to xResNet (including deep/deeper), ResNet, Inception, FCN/basic/SE CNN, LSTM and GRU builders: `code/models/fastai_model.py:328-402`.
-- Input crops are transformed from time-major records to channels-first model tensors; output is model logits, trained with FastAI BCE-with-logits: `code/models/fastai_model.py:210-286,302-312`.
-- Config variants are in `code/configs/fastai_configs.py:1-141`; legacy reproduction entry is `code/reproduce_results.py:17-44`.
-
-**Potential issues**
-
-- `SCP_Experiment.perform` handles unknown `modeltype` with `assert(True); break`, silently stopping rather than raising: `code/experiments/scp_experiment.py:149-155`.
-- Fine-tuning mismatch handling appears to pass `model.__dict__` as constructor kwargs: `code/experiments/scp_experiment.py:285-291`.
-
-## 6. Legacy CBAM-EMD FastAI Wrapper
-
-- Dataset wrapper: `PairedTimeseriesDatasetCrops`, `code/models/cbam_xresnet1d_model.py:41-80`.
-- It yields ECG crop `[B,12,T]` and EMD `[B,12,F]`; model construction uses `cbam_xresnet1d101`, BCE-with-logits and FastAI one-cycle fitting: `code/models/cbam_xresnet1d_model.py:125-171`.
-- Configs: `code/configs/cbam_configs.py:11-98`; active launcher selects late fusion only: `code/run_cbam_emd_experiment.py:8-15`.
-- Defined `ecg_only` and `feature_only` legacy configs are not selected by a repository launcher.
-
-## 7. Lightning Checkpoint Reconstructions
-
-- Definitions: `code/models/lightning_checkpoint_models.py:18-313`.
-- Supported checkpoint architectures: LeNet, bidirectional LSTM, bottleneck ResNet, Inception-v3-like 1D model, xResNet.
-- Loader validates key/tensor compatibility: `load_checkpoint_model`, `:290-313`.
-- Inference entry: `code/run_lightning_inference.py:89-220`.
-- Status: inference-only reconstruction; no Lightning training module or active training entry was found.
-
-## Feature Types Not Implemented as Trainable Fusion Branches
-
-- **Time-domain features:** `code/time_domain_robustness/` and `code/run_time_domain_robustness*.py` are tabular robustness analysis pipelines, not a neural feature branch or late-fusion classifier.
-- **Wavelet feature robustness:** `code/wavelet_feature_snr_robustness.py` and its notebook analyze precomputed features; they do not define a trainable fusion architecture.
-- **Transformer/CNN-LSTM:** no actual Transformer or CNN-LSTM class, builder, config, or training entry was found.
-
-## Key Architectural Differences
-
-- CBAM-xResNet differs from xResNet only by channel then temporal attention within residual blocks; SE is an alternative channel recalibration path.
-- Late fusion occurs after ECG max+mean pooling, before the final classifier; it is embedding-level fusion, not logits-level fusion.
-- EMD uses a flattened, globally normalized 132-D vector for the default 11-feature schema. Wavelet+NN is feature-only and uses 864 handcrafted inputs. Time-domain has no neural branch.
-- Concat and gated fusion share dimensions; gated fusion adds a 640-to-640 sigmoid gate before the same fusion MLP.
-- Inception1D uses parallel temporal convolution branches and periodic residual shortcuts; xResNet uses sequential bottleneck residual stages.
-- Recurrent models process time as sequence and use aggregate temporal/state features; CNN/xResNet/Inception models use convolutional feature maps and pooling.
-
-## Code Trace Mapping
-
-```text
-ablation experiment name
--> run_ablation_study.EXPERIMENTS
--> models.cbam_xresnet1d.build_model
--> CBAMXResNet1DLateFusion.forward
--> run_ablation_study.train_model
+canonical unified orchestration
+-> taskmanager.py
+-> code/task_manager/models.py
+-> code/models/original_model_catalog.py
+-> code/task_manager/runner.py
+-> prepare/run/report Python entries for the seven original models
 
 original benchmark model name
--> models.original_model_factory.BENCHMARK_MODEL_NAMES
--> build_original_model / build_wavelet_nn
--> model.forward / Keras model.fit
--> run_original_models_benchmark.run_one / run_wavelet
+-> original_model_catalog.canonical_model_name
+-> original_model_factory.build_original_model or build_wavelet_nn
+-> run_original_models_benchmark.run_one or run_wavelet
 
-legacy FastAI configuration
--> configs.fastai_configs or configs.cbam_configs
--> SCP_Experiment.perform
--> fastai_model or cbam_xresnet1d_model
--> FastAI Learner.fit_one_cycle
-```
+EMD ablation experiment
+-> run_ablation_study.EXPERIMENTS
+-> cbam_xresnet1d.build_model
+-> CBAMXResNet1DLateFusion.forward
 
-## Unused or Suspected Legacy Items
+CBAM/baseline Wavelet ablation
+-> run_wavelet_ablation_study.EXPERIMENTS
+-> wavelet_late_fusion.build_wavelet_ablation_model
+-> ECGOnlyXResNet or WaveletLateFusionXResNet
 
-- `code/models/your_model.py` and `code/configs/your_configs.py` are explicit placeholders; `fit` and `predict` are empty.
-- Lightning architecture files reconstruct checkpoints but have no training definition.
-- Legacy CBAM `ecg_only` and `feature_only` config variants are defined but lack an active launcher.
-- `code/test_evaluate_exp0.py` runs a legacy experiment at import time and is not a normal test.
-- `code/run_inference.py` and `code/recover_cbam_emd_predictions.py` contain hard-coded legacy relative paths.
-
-## Dummy Instantiation Record
-
-```text
-Attempted environment check: .venv/bin/python -c 'import torch'
-Result: ModuleNotFoundError: No module named 'torch'
-Successful model instantiations: 0
-Failed/unavailable dummy forwards: all PyTorch architectures (environment dependency unavailable)
-TensorFlow/Keras instantiation: not attempted; TensorFlow is not installed in the local analysis environment.
+SE Wavelet architecture (not currently runner-wired)
+-> configs/ablation_se_wavelet.yaml
+-> se_wavelet_late_fusion.build_model
+-> SEWaveletLateFusionXResNet
 ```

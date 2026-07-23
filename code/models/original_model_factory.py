@@ -3,43 +3,13 @@
 from models.basic_conv1d import fcn_wang, weight_init
 from models.cbam_xresnet1d import build_model
 from models.inception1d import inception1d
+from models.original_model_catalog import (ALIASES, BENCHMARK_MODEL_NAMES,
+                                           MODEL_NAMES, SE_MODEL_NAME,
+                                           WAVELET_MODEL_NAME,
+                                           canonical_model_name)
 from models.resnet1d import resnet1d_wang
 from models.rnn1d import RNN1d
 from models.xresnet1d import xresnet1d101
-
-
-MODEL_NAMES = (
-    'xresnet1d101',
-    'resnet1d_wang',
-    'lstm',
-    'lstm_bidir',
-    'fcn_wang',
-    'inception1d',
-)
-
-WAVELET_MODEL_NAME = 'wavelet_nn'
-SE_MODEL_NAME = 'se_xresnet1d101'
-BENCHMARK_MODEL_NAMES = MODEL_NAMES + (WAVELET_MODEL_NAME,)
-
-ALIASES = {
-    'bidir_lstm': 'lstm_bidir',
-    'bidirectional_lstm': 'lstm_bidir',
-    'fastai_xresnet1d101': 'xresnet1d101',
-    'fastai_resnet1d_wang': 'resnet1d_wang',
-    'fastai_lstm': 'lstm',
-    'fastai_lstm_bidir': 'lstm_bidir',
-    'fastai_fcn_wang': 'fcn_wang',
-    'fastai_inception1d': 'inception1d',
-    'wavelet': WAVELET_MODEL_NAME,
-    'wavelet+nn': WAVELET_MODEL_NAME,
-    'wavelet_nn': WAVELET_MODEL_NAME,
-}
-
-
-def canonical_model_name(name):
-    normalized = str(name).strip().lower().replace('-', '_').replace(' ', '_')
-    return ALIASES.get(normalized, normalized)
-
 
 def default_learning_rate(name):
     return 1e-3 if canonical_model_name(name) in ('lstm', 'lstm_bidir') else 1e-2

@@ -1,0 +1,37 @@
+version: 1
+
+# 指向已有 checkpoint 的 benchmark 输出根目录。
+output_dir: ../../results/original_models_benchmark
+
+global:
+  data_root: ../../data/ptbxl
+  data_config: ../../data/normalized/original_models_benchmark_data.json
+  seed: 42
+  batch_size: 128
+  crop_length: 250
+  num_workers: 0
+  device: cuda
+  resume: false
+  fail_fast: false
+
+# 按需删除模型即可只评估部分 checkpoint。
+models:
+  - xresnet1d101
+  - resnet1d_wang
+  - lstm
+  - lstm_bidir
+  - fcn_wang
+  - inception1d
+  - wavelet_nn
+
+tasks:
+  - name: evaluate
+    type: evaluate
+
+  - name: report
+    type: report
+    depends_on: [evaluate]
+
+  - name: package
+    type: package
+    depends_on: [report]

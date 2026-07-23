@@ -1,9 +1,12 @@
+import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from code.wavelet_feature_snr_robustness import FEATURE_TYPES, LEADS, run_analysis
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "code"))
+
+from wavelet_feature_snr_robustness import FEATURE_TYPES, LEADS, run_analysis
 
 
 def _features():
