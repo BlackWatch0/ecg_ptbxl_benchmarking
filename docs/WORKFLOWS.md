@@ -14,6 +14,8 @@ nvidia-smi
 
 当前训练环境使用 `environments/ecg-training.yml`。旧 fastai 推理使用 `environments/legacy/` 中的 Python 3.8 环境；不能仅凭环境名判断 checkpoint 与运行时兼容。
 
+AWS 正式训练前运行 `python code/check_training_environment.py --require-cuda --check-compute`，并确认 TensorFlow GPU 列表为空。完整依赖边界见 [`DEPENDENCIES.md`](DEPENDENCIES.md)。
+
 ## Taskmanager
 
 数据准备完成并通过 smoke 后，可使用 taskmanager 编排七模型训练、评估和报告：

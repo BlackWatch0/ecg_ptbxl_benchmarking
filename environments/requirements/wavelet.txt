@@ -1,0 +1,2 @@
+# Install only in the modern ecg-training environment.
+tensorflow-cpu==2.15.1

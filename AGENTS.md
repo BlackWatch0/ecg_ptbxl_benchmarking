@@ -25,6 +25,7 @@
 │   └── taskmanager/                # 可跟踪的 taskmanager YAML 配置
 ├── evaluation/                     # 与训练解耦的统一评估、adapter、指标和报告
 ├── docs/TASK_MANAGER_CONFIG.md     # taskmanager YAML 全量参数参考
+├── docs/DEPENDENCIES.md             # AWS 现代依赖与 runtime 隔离
 ├── environments/
 │   ├── ecg-training.yml            # Python 3.10 直接训练环境
 │   └── legacy/                     # Python 3.8/FastAI v1 历史环境快照
@@ -172,6 +173,8 @@ conda activate ecg-training
 
 legacy 文件用于复现，不是当前开发环境，不应把其中 Python 3.8、PyTorch 1.4 或 FastAI v1 约束传播到新代码。
 
+当前环境中 PyTorch 使用 CUDA 12.1，Wavelet+NN 使用 `tensorflow-cpu==2.15.1`。taskmanager 对 Wavelet 子进程设置 `CUDA_VISIBLE_DEVICES=-1` 并限制 BLAS 线程；不要安装 TensorFlow GPU 包或让 legacy 环境使用 A10G。
+
 ## 测试
 
 从仓库根目录运行：
@@ -180,7 +183,7 @@ legacy 文件用于复现，不是当前开发环境，不应把其中 Python 3.
 python -m pytest -q tests
 ```
 
-显式测试 `tests/` 可避免收集旧运行脚本 `code/test_evaluate_exp0.py`。`code/__init__.py` 暴露标准库同名模块的交互式 API，避免 FastAI/PDB 导入时发生名称冲突。CI 位于 `.github/workflows/python-tests.yml`，监听 `master` 和 `main` 的 push/PR，使用 Python 3.10 与 CPU PyTorch。测试包含工具函数、数据契约、模型 dummy forward、benchmark/report 和统一评估，不运行完整数据训练。
+显式测试 `tests/` 只收集受维护的测试套件。`code/__init__.py` 暴露标准库同名模块的交互式 API，避免 FastAI/PDB 导入时发生名称冲突。CI 位于 `.github/workflows/python-tests.yml`，监听 `master` 和 `main` 的 push/PR，使用 Python 3.10 与 CPU PyTorch。测试包含工具函数、数据契约、模型 dummy forward、benchmark/report 和统一评估，不运行完整数据训练。
 
 修改训练/评估代码后至少运行相关测试；修改共享模型 factory、数据契约或报告 schema 时运行完整测试。需要真实 PTB-XL、GPU 或大型 checkpoint 的验证必须明确记录为本地/Colab 验证，不能伪装成 CI 覆盖。
 

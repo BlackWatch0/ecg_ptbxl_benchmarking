@@ -1,0 +1,27 @@
+version: 1
+workflow: legacy_scp_evaluation
+
+# This archive describes the retired code/test_evaluate_exp0.py entry point.
+# It requires the legacy FastAI v1 environment and is not a taskmanager config.
+paths:
+  base: repository_root
+  data_root: data/ptbxl_clean_no_noise
+  output_root: output
+
+experiment:
+  name: exp0
+  task: all
+  database_filename: ptbxl_database_clean_no_noise.csv
+  dataset_type: ptbxl
+  models:
+    - config: conf_fastai_xresnet1d101
+
+evaluation:
+  bootstrap_eval: false
+  result_models:
+    - naive
+    - fastai_xresnet1d101
+  result_file: exp0/models/{model}/results/te_results.csv
+  report:
+    index: point
+    metric: macro_auc

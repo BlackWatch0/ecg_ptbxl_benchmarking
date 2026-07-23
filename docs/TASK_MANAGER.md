@@ -17,6 +17,8 @@
 
 taskmanager 不调用 [`scripts/legacy/`](../scripts/legacy/README.md) 中的 Shell，不编排 fastai/Lightning 独立推理、`evaluation/evaluate.py`、CBAM/SE/EMD 消融，也不提供原生 S3。
 
+七模型共享现代环境，但 `wavelet_nn` 子进程会隐藏 CUDA 并使用 CPU-only TensorFlow；依赖安装见 [`DEPENDENCIES.md`](DEPENDENCIES.md)。
+
 ## 命令
 
 当前 CLI 只有以下命令：

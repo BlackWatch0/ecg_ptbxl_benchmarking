@@ -9,7 +9,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "code"))
 
 from task_manager.config import ConfigError, load_config
-from task_manager.runner import TaskRunner
+from task_manager.runner import TaskRunner, _is_foreign_absolute_path
 
 
 def write_config(path, value):
@@ -93,6 +93,10 @@ def test_dry_run_writes_commands_status_and_logs_without_training(tmp_path):
         expected = "11" if model == "xresnet1d101" else "7"
         assert run["command"][seed_index + 1] == expected
     assert (output / "config" / "resolved_config.yaml").is_file()
+    progress = (output / "task_plan_progress.log").read_text(encoding="utf-8")
+    assert "TASKMANAGER_START" in progress
+    assert "TASK_PLANNED task=evaluate type=evaluate" in progress
+    assert "RUN_START task=evaluate run=xresnet1d101_seed_11" in progress
 
 
 def test_dry_run_does_not_replace_runtime_status(tmp_path):
@@ -123,6 +127,31 @@ def test_execution_uses_one_safe_subprocess_per_model(tmp_path, monkeypatch):
     assert all(call[0][0] == sys.executable for call in calls)
     assert all(call[1]["shell"] is False for call in calls)
     assert all("--skip-test-evaluation" in call[0] for call in calls)
+    progress = (Path(config["output_dir"]) / "task_progress.log").read_text(encoding="utf-8")
+    assert "TASK_START task=train type=train" in progress
+    assert "RUN_COMPLETED task=train run=xresnet1d101_seed_7 returncode=0" in progress
+    assert "TASKMANAGER_COMPLETED" in progress
+
+
+def test_wavelet_process_is_cpu_only(tmp_path, monkeypatch):
+    value = base_config(tmp_path)
+    value["global"].update({"resume": False, "device": "cuda"})
+    value["models"] = ["wavelet_nn"]
+    value["tasks"] = [{"name": "train", "type": "train"}]
+    config = load_config(write_config(tmp_path / "wavelet.yaml", value))
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr("task_manager.runner.subprocess.run", fake_run)
+    assert TaskRunner(config).run() == 0
+    command, kwargs = calls[0]
+    assert command[command.index("--device") + 1] == "cpu"
+    assert kwargs["env"]["CUDA_VISIBLE_DEVICES"] == "-1"
+    assert kwargs["env"]["OMP_NUM_THREADS"] == "1"
+    assert kwargs["env"]["TF_CPP_MIN_LOG_LEVEL"] == "2"
 
 
 def test_resume_skips_completed_run_without_truncating_log(tmp_path, monkeypatch):
@@ -166,6 +195,22 @@ def test_foreign_absolute_paths_are_not_rewritten(tmp_path):
     config = load_config(write_config(tmp_path / "paths.yaml", value))
     assert config["output_dir"] == "/mnt/ecg/runs/example"
     assert config["global"]["data_root"] == "C:\\ecg\\data"
+
+
+def test_foreign_paths_validate_but_cannot_run_on_the_wrong_os(tmp_path):
+    assert _is_foreign_absolute_path("/mnt/ecg/run", platform_name="nt")
+    assert _is_foreign_absolute_path("C:\\ecg\\run", platform_name="posix")
+    assert not _is_foreign_absolute_path("/mnt/ecg/run", platform_name="posix")
+    value = {
+        "version": 1,
+        "output_dir": "/mnt/ecg/run",
+        "models": ["xresnet1d101"],
+        "tasks": [{"name": "train", "type": "train"}],
+    }
+    config = load_config(write_config(tmp_path / "foreign.yaml", value))
+    if sys.platform == "win32":
+        with pytest.raises(ValueError, match="another operating system"):
+            TaskRunner(config, dry_run=True)
 
 
 @pytest.mark.parametrize("name", [

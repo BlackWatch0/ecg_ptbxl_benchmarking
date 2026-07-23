@@ -17,6 +17,7 @@
 |---|---|
 | [任务管理](docs/TASK_MANAGER.md) | taskmanager 命令、配置、状态与执行边界 |
 | [YAML 参数参考](docs/TASK_MANAGER_CONFIG.md) | 所有可选字段、默认值、优先级与 task 参数 |
+| [依赖与环境](docs/DEPENDENCIES.md) | AWS 训练依赖、版本固定、GPU/CPU 隔离和环境检查 |
 | [AWS 部署](docs/AWS_SETUP.md) | EC2、加密 gp3 EBS、SSM、环境和人工 S3 同步 |
 | [数据资产](docs/DATA_ASSETS.md) | 数据来源、目录契约、对齐要求和 blocked 资产 |
 | [工作流](docs/WORKFLOWS.md) | 当前 Python 入口、smoke、resume、日志和输出 |
@@ -31,9 +32,11 @@
 ```bash
 conda env create -f environments/ecg-training.yml
 conda activate ecg-training
+python -m pip check
+python code/check_training_environment.py --require-cuda --check-compute
 ```
 
-该环境以 Python 3.10、PyTorch 2.5/CUDA 12.1 为基线，并包含 Wavelet+NN 所需依赖。旧 fastai v1 环境保存在 `environments/legacy/`，只用于对应历史入口，不要与当前训练环境混用。
+该环境固定 Python 3.10.16、PyTorch 2.5.1/CUDA 12.1，并使用 CPU-only TensorFlow 2.15.1 运行 Wavelet+NN。完整版本和验证方式见 [`docs/DEPENDENCIES.md`](docs/DEPENDENCIES.md)。旧 fastai v1 环境保存在 `environments/legacy/`，只用于对应历史入口，不要与当前训练环境混用。
 
 ## Taskmanager
 

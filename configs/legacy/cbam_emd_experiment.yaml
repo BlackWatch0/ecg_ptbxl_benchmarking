@@ -1,0 +1,20 @@
+version: 1
+workflow: legacy_scp_training_and_evaluation
+
+# Archived from code/run_cbam_emd_experiment.py. Not a taskmanager config.
+paths:
+  base: repository_root
+  data_root: data/ptbxl_clean_no_noise
+  output_root: output
+
+experiment:
+  name: exp_emd_late_fusion_superdiagnostic
+  task: superdiagnostic
+  database_filename: ptbxl_database_clean_no_noise.csv
+  dataset_type: ptbxl
+  models:
+    - config: conf_cbam_xresnet1d101_late_fusion_superdiagnostic
+  stages:
+    - prepare
+    - perform
+    - evaluate

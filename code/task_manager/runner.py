@@ -4,7 +4,7 @@ import json
 import os
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import yaml
 
@@ -61,6 +61,13 @@ def _atomic_json(path, value):
 def _digest(config):
     content = json.dumps(config, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _is_foreign_absolute_path(value, platform_name=None):
+    platform_name = os.name if platform_name is None else platform_name
+    if platform_name == "nt":
+        return PurePosixPath(value).is_absolute() and not PureWindowsPath(value).is_absolute()
+    return PureWindowsPath(value).is_absolute() and not PurePosixPath(value).is_absolute()
 
 
 def _selected_tasks(tasks, names):
@@ -156,9 +163,15 @@ class TaskRunner:
         self.config = config
         self.tasks = _selected_tasks(config["tasks"], task_names)
         self.dry_run = dry_run
+        if _is_foreign_absolute_path(config["output_dir"]):
+            raise ValueError(
+                "output_dir uses a path for another operating system: {}".format(
+                    config["output_dir"]))
         self.output = Path(config["output_dir"])
         self.runtime_status_path = self.output / "task_status.json"
         self.status_path = self.output / ("task_plan.json" if dry_run else "task_status.json")
+        self.progress_path = self.output / (
+            "task_plan_progress.log" if dry_run else "task_progress.log")
         self.digest = _digest(config)
         self.resume = bool(config["global"].get("resume", False))
         self.fail_fast = config["global"].get("fail_fast", True)
@@ -189,6 +202,17 @@ class TaskRunner:
         self.status["updated_at"] = _now()
         _atomic_json(self.status_path, self.status)
 
+    def _write_progress(self, event, **fields):
+        details = " ".join(
+            "{}={}".format(name, value)
+            for name, value in fields.items()
+            if value is not None
+        )
+        self.progress_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.progress_path.open("a", encoding="utf-8") as progress:
+            progress.write("{} {}{}\n".format(
+                _now(), event, " " + details if details else ""))
+
     def _write_resolved(self):
         resolved = dict(self.config)
         _atomic_text(
@@ -200,7 +224,7 @@ class TaskRunner:
         run = self.previous.get("tasks", {}).get(task_name, {}).get("runs", {}).get(run_name, {})
         return run.get("status") in ("completed", "skipped")
 
-    def _run_command(self, task, run_name, command, resume):
+    def _run_command(self, task, run_name, command, resume, environment_overrides=None):
         safe_name = run_name.replace("/", "_").replace("\\", "_")
         log_directory = "task_plan_logs" if self.dry_run else "task_logs"
         log_path = self.output / log_directory / task["name"] / "{}.log".format(safe_name)
@@ -211,13 +235,18 @@ class TaskRunner:
             "log": str(log_path),
             "started_at": _now(),
         }
+        if environment_overrides:
+            record["environment"] = dict(environment_overrides)
         self.status["tasks"][task["name"]]["runs"][run_name] = record
         self._write_status()
+        self._write_progress(
+            "RUN_START", task=task["name"], run=run_name, log=log_path)
         if not self.dry_run and resume and self._was_completed(task["name"], run_name):
             record["status"] = "skipped"
             record["reason"] = "already completed with the same resolved config"
             record["finished_at"] = _now()
             self._write_status()
+            self._write_progress("RUN_SKIPPED", task=task["name"], run=run_name)
             return True
         with log_path.open("w", encoding="utf-8") as log:
             log.write("COMMAND: {}\n".format(json.dumps(command)))
@@ -226,6 +255,7 @@ class TaskRunner:
                 return True
             environment = os.environ.copy()
             environment["PYTHONUNBUFFERED"] = "1"
+            environment.update(environment_overrides or {})
             try:
                 completed = subprocess.run(
                     command,
@@ -241,11 +271,16 @@ class TaskRunner:
                 record["error"] = str(error)
                 record["finished_at"] = _now()
                 self._write_status()
+                self._write_progress(
+                    "RUN_FAILED", task=task["name"], run=run_name, error=error)
                 return False
         record["returncode"] = completed.returncode
         record["status"] = "completed" if completed.returncode == 0 else "failed"
         record["finished_at"] = _now()
         self._write_status()
+        self._write_progress(
+            "RUN_COMPLETED" if completed.returncode == 0 else "RUN_FAILED",
+            task=task["name"], run=run_name, returncode=completed.returncode)
         return completed.returncode == 0
 
     def _execute_task(self, task):
@@ -258,15 +293,29 @@ class TaskRunner:
         }
         self.status["tasks"][task["name"]] = entry
         self._write_status()
+        self._write_progress("TASK_START", task=task["name"], type=task["type"])
         succeeded = True
         if task["type"] in ("train", "evaluate"):
             for model in task["models"]:
                 options = _merge_benchmark_options(self.config, task, model)
                 for seed in options["seeds"]:
                     run_name = "{}_seed_{}".format(model, seed)
-                    command = _benchmark_command(task["type"], model, seed, options)
+                    run_options = dict(options)
+                    environment_overrides = None
+                    if model == "wavelet_nn":
+                        run_options["device"] = "cpu"
+                        environment_overrides = {
+                            "CUDA_VISIBLE_DEVICES": "-1",
+                            "OMP_NUM_THREADS": "1",
+                            "MKL_NUM_THREADS": "1",
+                            "OPENBLAS_NUM_THREADS": "1",
+                            "NUMEXPR_NUM_THREADS": "1",
+                            "TF_CPP_MIN_LOG_LEVEL": "2",
+                        }
+                    command = _benchmark_command(task["type"], model, seed, run_options)
                     current = self._run_command(
-                        task, run_name, command, options.get("resume", False))
+                        task, run_name, command, options.get("resume", False),
+                        environment_overrides=environment_overrides)
                     succeeded = current and succeeded
                     if not current and self.fail_fast:
                         break
@@ -278,12 +327,16 @@ class TaskRunner:
         entry["status"] = "planned" if self.dry_run else ("completed" if succeeded else "failed")
         entry["finished_at"] = _now()
         self._write_status()
+        self._write_progress(
+            "TASK_{}".format(entry["status"].upper()), task=task["name"], type=task["type"])
         return succeeded
 
     def run(self):
         self.output.mkdir(parents=True, exist_ok=True)
         self._write_resolved()
         self._write_status()
+        self._write_progress(
+            "TASKMANAGER_START", dry_run=self.dry_run, config=self.config["config_path"])
         failed = False
         for task in self.tasks:
             failed_dependencies = [
@@ -300,6 +353,8 @@ class TaskRunner:
                     "finished_at": _now(),
                 }
                 self._write_status()
+                self._write_progress(
+                    "TASK_SKIPPED", task=task["name"], reason=self.status["tasks"][task["name"]]["reason"])
                 continue
             if failed and self.fail_fast:
                 self.status["tasks"][task["name"]] = {
@@ -311,9 +366,12 @@ class TaskRunner:
                     "finished_at": _now(),
                 }
                 self._write_status()
+                self._write_progress(
+                    "TASK_SKIPPED", task=task["name"], reason=self.status["tasks"][task["name"]]["reason"])
                 continue
             failed = not self._execute_task(task) or failed
         self.status["status"] = "planned" if self.dry_run else ("failed" if failed else "completed")
         self.status["finished_at"] = _now()
         self._write_status()
+        self._write_progress("TASKMANAGER_{}".format(self.status["status"].upper()))
         return 1 if failed else 0
