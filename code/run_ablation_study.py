@@ -38,6 +38,18 @@ EXPERIMENTS = {
     'xresnet1d101_emd_late_fusion': dict(use_cbam=False, use_se=False, use_emd=True, fusion_type='concat'),
     'cbam_xresnet1d101_emd_late_fusion': dict(use_cbam=True, use_se=False, use_emd=True, fusion_type='concat'),
     'se_xresnet1d101_emd_late_fusion': dict(use_cbam=False, use_se=True, use_emd=True, fusion_type='concat'),
+    'cbam_xresnet1d101_emd_late_fusion_emb32_gated': dict(
+        use_cbam=True, use_se=False, use_emd=True, fusion_type='gated',
+        model_variant='emd_bottleneck_gated', emd_embedding_dim=32),
+    'cbam_xresnet1d101_emd_late_fusion_emb64_gated': dict(
+        use_cbam=True, use_se=False, use_emd=True, fusion_type='gated',
+        model_variant='emd_bottleneck_gated', emd_embedding_dim=64),
+    'emd_only_mlp_emb32': dict(use_cbam=False, use_se=False, use_emd=True,
+                               fusion_type='none', model_variant='emd_only_bottleneck',
+                               emd_embedding_dim=32),
+    'emd_only_mlp_emb64': dict(use_cbam=False, use_se=False, use_emd=True,
+                               fusion_type='none', model_variant='emd_only_bottleneck',
+                               emd_embedding_dim=64),
 }
 DEFAULT_CONFIG = {
     'task': 'superdiagnostic', 'num_classes': 5, 'class_names': CLASS_NAMES,
@@ -307,6 +319,53 @@ def predict(model, loader, device, use_emd):
     return probabilities, np.vstack(targets), (time.time() - started) * 1000 / len(probabilities)
 
 
+def predict_branch_mode(model, loader, device, emd_mode='normal', ecg_mode='normal'):
+    """Evaluate a branch intervention and retain only compact diagnostics."""
+    model.eval()
+    probabilities, diagnostics = [], {}
+    with torch.no_grad():
+        for batch in loader:
+            ecg, emd, _ = batch
+            output = model(ecg.to(device), emd.to(device), emd_mode=emd_mode,
+                           ecg_mode=ecg_mode, return_diagnostics=True)
+            logits, values = output
+            probabilities.append(torch.sigmoid(logits).cpu().numpy())
+            for name, value in values.items():
+                if value is not None:
+                    diagnostics.setdefault(name, []).append(value.detach().float().cpu().reshape(value.size(0), -1))
+    summary = {}
+    for name, values in diagnostics.items():
+        values = torch.cat(values)
+        summary[name] = {'mean': float(values.mean()), 'std': float(values.std(unbiased=False)),
+                         'mean_l2_norm': float(torch.linalg.vector_norm(values, dim=1).mean())}
+    return np.vstack(probabilities), summary
+
+
+def save_branch_diagnostics(model, split, seed, prediction_dir, metrics_dir, scenario, device, batch_size):
+    """Store deterministic EMD/ECG intervention effects without changing normal metrics."""
+    if not getattr(model, 'supports_branch_diagnostics', False):
+        return
+    permutation = np.random.default_rng(seed).permutation(len(split['ids']))
+    np.save(prediction_dir / 'emd_shuffle_permutation_{}.npy'.format(scenario), permutation)
+    normal_loader = build_loader(split, True, batch_size)
+    normal, diagnostic_summary = predict_branch_mode(model, normal_loader, device)
+    zero_emd, _ = predict_branch_mode(model, build_loader(split, True, batch_size), device, emd_mode='zero')
+    shuffled_split = dict(split, emd=split['emd'][permutation])
+    shuffled, _ = predict_branch_mode(model, build_loader(shuffled_split, True, batch_size), device)
+    result = {
+        'scenario': scenario,
+        'seed': seed,
+        'shuffle_permutation_file': str(prediction_dir / 'emd_shuffle_permutation_{}.npy'.format(scenario)),
+        'normal_diagnostics': diagnostic_summary,
+        'mean_abs_probability_delta_zero_emd': float(np.abs(normal - zero_emd).mean()),
+        'mean_abs_probability_delta_shuffle_emd': float(np.abs(normal - shuffled).mean()),
+    }
+    if hasattr(model, 'ecg_backbone'):
+        zero_ecg, _ = predict_branch_mode(model, build_loader(split, True, batch_size), device, ecg_mode='zero')
+        result['mean_abs_probability_delta_zero_ecg'] = float(np.abs(normal - zero_ecg).mean())
+    json_dump(metrics_dir / 'seed_{}_{}_branch_contributions.json'.format(seed, scenario), result)
+
+
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters()), sum(p.numel() for p in model.parameters() if p.requires_grad)
 
@@ -498,12 +557,18 @@ def smoke_test(bundle, config, device):
         raise ValueError('SE+EMD parameter count must exceed baseline+EMD')
 
 
-def load_checkpoint(model, checkpoint, device):
+def load_checkpoint(model, checkpoint, device, expected_config=None):
     try:
         state = torch.load(checkpoint, map_location=device, weights_only=False)
     except TypeError:
         state = torch.load(checkpoint, map_location=device)
-    model.load_state_dict(state['model'])
+    saved_config = state.get('config', {})
+    if expected_config and expected_config.get('model_variant') in ('emd_bottleneck_gated', 'emd_only_bottleneck'):
+        for key in ('model_variant', 'emd_embedding_dim', 'emd_features'):
+            if saved_config.get(key) != expected_config.get(key):
+                raise ValueError('Checkpoint {} does not match {}: {} != {}'.format(
+                    checkpoint, key, saved_config.get(key), expected_config.get(key)))
+    model.load_state_dict(state['model'], strict=True)
     return state
 
 
@@ -552,7 +617,7 @@ def run_one(name, seed, bundle, config, output_root, device, args):
                     model = build_model('xresnet1d101', 5, **spec, emd_features=len(bundle['emd_columns'])).to(device)
         if not checkpoint.exists():
             raise FileNotFoundError('No checkpoint for {} seed {}'.format(name, seed))
-        state = load_checkpoint(model, checkpoint, device)
+        state = load_checkpoint(model, checkpoint, device, run_config)
         best_epoch = state.get('epoch', best_epoch)
         best_loss = state.get('best_valid_loss', best_loss)
         val_loader = build_loader(bundle['splits']['val'], spec['use_emd'], config['batch_size'])
@@ -580,6 +645,9 @@ def run_one(name, seed, bundle, config, output_root, device, args):
                          labels=bundle['splits']['test']['labels'])
             test_loader = build_loader(split, spec['use_emd'], config['batch_size'])
             probabilities, y_test, inference_ms = predict(model, test_loader, device, spec['use_emd'])
+            if spec.get('model_variant') in ('emd_bottleneck_gated', 'emd_only_bottleneck'):
+                save_branch_diagnostics(model, split, seed, prediction_dir,
+                                        output_root / 'metrics' / name, scenario, device, config['batch_size'])
             json_dump(output_root / 'metrics' / name / 'seed_{}_{}_integrity.json'.format(seed, scenario), checks)
             for strategy, threshold in [('threshold_0.5', .5), ('best_global_threshold', global_threshold),
                                         ('per_class_thresholds', np.array([per_class_thresholds[x] for x in CLASS_NAMES]))]:
