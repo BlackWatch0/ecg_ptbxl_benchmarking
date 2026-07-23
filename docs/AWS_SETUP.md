@@ -15,9 +15,9 @@ AMI 有两种选择：
 | 选择 | 适用场景 | 注意事项 |
 |---|---|---|
 | 当前 Region 的 AWS Deep Learning AMI GPU PyTorch | 希望复用已安装的 NVIDIA driver、CUDA 和 PyTorch | AMI 名称和 ID 随 Region/日期变化，启动时从 AWS 官方 DLAMI 列表选择，不在文档中固定 AMI ID |
-| Ubuntu Server 22.04 LTS x86_64 | 需要完全控制依赖 | 需自行安装匹配 A10G 的 NVIDIA driver/CUDA/PyTorch；先验证 `nvidia-smi` 和 CUDA smoke |
+| Ubuntu Server 22.04 LTS x86_64 | 需要完全控制依赖 | 需安装匹配 A10G 的 NVIDIA driver；Conda 提供 PyTorch/CUDA runtime，不需要系统 CUDA Toolkit |
 
-`environments/ecg-training.yml` 是 Python 3.10、PyTorch 2.5、CUDA 12.1 的当前训练环境。`environments/legacy/` 中的 Python 3.8、PyTorch 1.4 和 fastai v1 环境不应作为 A10G 当前训练环境的默认方案，只用于确有需要的旧 fastai 路径。
+`environments/ecg-training.yml` 固定 Python 3.10.16、PyTorch 2.5.1、CUDA 12.1 和 CPU-only TensorFlow 2.15.1。PyTorch 使用 A10G；Wavelet+NN 的 TensorFlow 分类器使用 CPU。完整依赖矩阵见 [`DEPENDENCIES.md`](DEPENDENCIES.md)。`environments/legacy/` 中的 Python 3.8、PyTorch 1.4 和 fastai v1 环境不能依赖 A10G GPU，只用于 CPU 历史复现。
 
 建议实例配置：
 
@@ -125,12 +125,17 @@ cd /mnt/ecg/workspace/ecg_ptbxl_benchmarking
 git rev-parse HEAD
 ```
 
-DLAMI 可创建仓库当前 Conda 环境；Ubuntu 应先安装 Miniconda/Conda，再创建同一环境。PyTorch CUDA 包仍要求主机 NVIDIA driver 足够新。创建并记录环境：
+DLAMI 可创建仓库当前 Conda 环境；Ubuntu 应先安装 Miniforge/Conda 和 NVIDIA driver，再创建同一环境。不要重新安装 DLAMI 已有 driver，也不要混装系统 CUDA Toolkit。创建并验证环境：
 
 ```bash
 cd /mnt/ecg/workspace/ecg_ptbxl_benchmarking
-conda env create -f environments/ecg-training.yml
+conda env create --solver libmamba -f environments/ecg-training.yml
 conda activate ecg-training
+python -m pip check
+python code/check_training_environment.py \
+  --require-cuda \
+  --check-compute \
+  --output /mnt/ecg/runs/environment-check.json
 ```
 
 无论采用哪种 AMI，都记录环境：
@@ -138,11 +143,12 @@ conda activate ecg-training
 ```bash
 python --version
 python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"
+python -c "import tensorflow as tf; print(tf.__version__, tf.config.list_physical_devices('GPU'))"
 python -m pip freeze > /mnt/ecg/runs/environment-pip-freeze.txt
 nvidia-smi > /mnt/ecg/runs/environment-nvidia-smi.txt
 ```
 
-不要为了兼容旧 fastai 降级 `ecg-training` 环境；需要旧入口时创建独立 legacy 环境。
+TensorFlow GPU 列表必须为空，这是预期配置。不要为了兼容旧 fastai 降级 `ecg-training` 环境；需要旧入口时创建独立 legacy CPU 环境。
 
 ## 人工同步数据
 

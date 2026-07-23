@@ -9,7 +9,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "code"))
 
 from task_manager.config import ConfigError, load_config
-from task_manager.runner import TaskRunner
+from task_manager.runner import TaskRunner, _is_foreign_absolute_path
 
 
 def write_config(path, value):
@@ -125,6 +125,27 @@ def test_execution_uses_one_safe_subprocess_per_model(tmp_path, monkeypatch):
     assert all("--skip-test-evaluation" in call[0] for call in calls)
 
 
+def test_wavelet_process_is_cpu_only(tmp_path, monkeypatch):
+    value = base_config(tmp_path)
+    value["global"].update({"resume": False, "device": "cuda"})
+    value["models"] = ["wavelet_nn"]
+    value["tasks"] = [{"name": "train", "type": "train"}]
+    config = load_config(write_config(tmp_path / "wavelet.yaml", value))
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr("task_manager.runner.subprocess.run", fake_run)
+    assert TaskRunner(config).run() == 0
+    command, kwargs = calls[0]
+    assert command[command.index("--device") + 1] == "cpu"
+    assert kwargs["env"]["CUDA_VISIBLE_DEVICES"] == "-1"
+    assert kwargs["env"]["OMP_NUM_THREADS"] == "1"
+    assert kwargs["env"]["TF_CPP_MIN_LOG_LEVEL"] == "2"
+
+
 def test_resume_skips_completed_run_without_truncating_log(tmp_path, monkeypatch):
     value = base_config(tmp_path)
     value["models"] = ["xresnet1d101"]
@@ -166,6 +187,22 @@ def test_foreign_absolute_paths_are_not_rewritten(tmp_path):
     config = load_config(write_config(tmp_path / "paths.yaml", value))
     assert config["output_dir"] == "/mnt/ecg/runs/example"
     assert config["global"]["data_root"] == "C:\\ecg\\data"
+
+
+def test_foreign_paths_validate_but_cannot_run_on_the_wrong_os(tmp_path):
+    assert _is_foreign_absolute_path("/mnt/ecg/run", platform_name="nt")
+    assert _is_foreign_absolute_path("C:\\ecg\\run", platform_name="posix")
+    assert not _is_foreign_absolute_path("/mnt/ecg/run", platform_name="posix")
+    value = {
+        "version": 1,
+        "output_dir": "/mnt/ecg/run",
+        "models": ["xresnet1d101"],
+        "tasks": [{"name": "train", "type": "train"}],
+    }
+    config = load_config(write_config(tmp_path / "foreign.yaml", value))
+    if sys.platform == "win32":
+        with pytest.raises(ValueError, match="another operating system"):
+            TaskRunner(config, dry_run=True)
 
 
 @pytest.mark.parametrize("name", [

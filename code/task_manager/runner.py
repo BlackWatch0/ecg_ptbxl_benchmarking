@@ -4,7 +4,7 @@ import json
 import os
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import yaml
 
@@ -61,6 +61,13 @@ def _atomic_json(path, value):
 def _digest(config):
     content = json.dumps(config, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _is_foreign_absolute_path(value, platform_name=None):
+    platform_name = os.name if platform_name is None else platform_name
+    if platform_name == "nt":
+        return PurePosixPath(value).is_absolute() and not PureWindowsPath(value).is_absolute()
+    return PureWindowsPath(value).is_absolute() and not PurePosixPath(value).is_absolute()
 
 
 def _selected_tasks(tasks, names):
@@ -156,6 +163,10 @@ class TaskRunner:
         self.config = config
         self.tasks = _selected_tasks(config["tasks"], task_names)
         self.dry_run = dry_run
+        if _is_foreign_absolute_path(config["output_dir"]):
+            raise ValueError(
+                "output_dir uses a path for another operating system: {}".format(
+                    config["output_dir"]))
         self.output = Path(config["output_dir"])
         self.runtime_status_path = self.output / "task_status.json"
         self.status_path = self.output / ("task_plan.json" if dry_run else "task_status.json")
@@ -200,7 +211,7 @@ class TaskRunner:
         run = self.previous.get("tasks", {}).get(task_name, {}).get("runs", {}).get(run_name, {})
         return run.get("status") in ("completed", "skipped")
 
-    def _run_command(self, task, run_name, command, resume):
+    def _run_command(self, task, run_name, command, resume, environment_overrides=None):
         safe_name = run_name.replace("/", "_").replace("\\", "_")
         log_directory = "task_plan_logs" if self.dry_run else "task_logs"
         log_path = self.output / log_directory / task["name"] / "{}.log".format(safe_name)
@@ -211,6 +222,8 @@ class TaskRunner:
             "log": str(log_path),
             "started_at": _now(),
         }
+        if environment_overrides:
+            record["environment"] = dict(environment_overrides)
         self.status["tasks"][task["name"]]["runs"][run_name] = record
         self._write_status()
         if not self.dry_run and resume and self._was_completed(task["name"], run_name):
@@ -226,6 +239,7 @@ class TaskRunner:
                 return True
             environment = os.environ.copy()
             environment["PYTHONUNBUFFERED"] = "1"
+            environment.update(environment_overrides or {})
             try:
                 completed = subprocess.run(
                     command,
@@ -264,9 +278,22 @@ class TaskRunner:
                 options = _merge_benchmark_options(self.config, task, model)
                 for seed in options["seeds"]:
                     run_name = "{}_seed_{}".format(model, seed)
-                    command = _benchmark_command(task["type"], model, seed, options)
+                    run_options = dict(options)
+                    environment_overrides = None
+                    if model == "wavelet_nn":
+                        run_options["device"] = "cpu"
+                        environment_overrides = {
+                            "CUDA_VISIBLE_DEVICES": "-1",
+                            "OMP_NUM_THREADS": "1",
+                            "MKL_NUM_THREADS": "1",
+                            "OPENBLAS_NUM_THREADS": "1",
+                            "NUMEXPR_NUM_THREADS": "1",
+                            "TF_CPP_MIN_LOG_LEVEL": "2",
+                        }
+                    command = _benchmark_command(task["type"], model, seed, run_options)
                     current = self._run_command(
-                        task, run_name, command, options.get("resume", False))
+                        task, run_name, command, options.get("resume", False),
+                        environment_overrides=environment_overrides)
                     succeeded = current and succeeded
                     if not current and self.fail_fast:
                         break

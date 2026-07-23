@@ -22,6 +22,8 @@ python taskmanager.py run --config configs/taskmanager/my_benchmark.yaml
 
 所有相对路径均相对于 YAML 文件所在目录解析，不相对于当前终端目录解析。配置仅接受本地文件系统路径；AWS 上使用 EBS 路径，不填写 `s3://` URI。
 
+`validate` 可以在 Windows 检查包含 `/mnt/ecg/...` 的 AWS YAML，但 `run`/`--dry-run` 必须在与路径格式匹配的操作系统执行，避免把 Linux 绝对路径误写到 Windows 当前盘符。
+
 ## 完整结构示例
 
 ```yaml
@@ -141,7 +143,7 @@ tasks:
 | `learning_rate` | positive number | LSTM/BiLSTM `0.001`，其他 raw 模型 `0.01` | `--learning-rate` | 仅覆盖 PyTorch raw-waveform 模型；Wavelet+NN 使用 Adamax 默认设置 |
 | `crop_length` | positive integer | `250` | `--crop-length` | raw-waveform 训练和推理 crop 长度 |
 | `num_workers` | non-negative integer | `0` | `--num-workers` | PyTorch DataLoader worker 数 |
-| `device` | non-empty string | CUDA 可用时 `cuda`，否则 `cpu` | `--device` | 例如 `cuda`、`cuda:0`、`cpu` |
+| `device` | non-empty string | CUDA 可用时 `cuda`，否则 `cpu` | `--device` | raw-waveform 模型使用该设备；taskmanager 强制 Wavelet+NN 使用 CPU |
 | `official_raw_data` | boolean | `false` | `--official-raw-data` | 使用官方 PTB-XL metadata/records 路径而非 fork 的 clean 布局 |
 | `cache_dir` | path | 由底层数据入口决定 | `--cache-dir` | official raw data 的可重建缓存目录 |
 | `resume` | boolean | `false` | `--resume` | 恢复底层 checkpoint；在 `global` 中还启用 task 状态恢复 |
@@ -292,6 +294,8 @@ tasks:
 evaluate task 调用同一 benchmark runner，自动添加 `--evaluate-only`。它要求目标运行根目录中已经存在对应模型和 seed 的 checkpoint。
 
 evaluate 的 `options` 接受 Global 参数表中除 `fail_fast` 外的全部 benchmark 字段。类别顺序固定为 `NORM, MI, STTC, CD, HYP`，测试域固定为 clean、五个 noisy SNR 和五个 denoised SNR，阈值固定来自 validation fold 9。
+
+为避免 TensorFlow 与 PyTorch CUDA runtime/显存冲突，`wavelet_nn` 子进程总是使用 `--device cpu` 和 `CUDA_VISIBLE_DEVICES=-1`，同时把 OMP/MKL/OpenBLAS/NumExpr 线程设为 1，避免与 Wavelet 多进程提取叠加；其他模型使用配置的 `device`。
 
 ```yaml
 tasks:

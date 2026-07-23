@@ -41,6 +41,16 @@ def test_wavelet_alias_uses_feature_factory():
         build_original_model('wavelet_nn')
 
 
+def test_wavelet_feature_extraction_supports_serial_aws_fallback():
+    pytest.importorskip('pywt')
+    from models.wavelet import get_ecg_features
+
+    features = get_ecg_features(
+        np.zeros((1, 1000, 12), dtype=np.float32), parallel=False)
+    assert features.shape == (1, WAVELET_FEATURE_COUNT)
+    assert np.isfinite(features).all()
+
+
 def test_wavelet_factory_preserves_original_architecture(monkeypatch):
     operations = []
 

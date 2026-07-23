@@ -1,28 +1,18 @@
-from scipy.fftpack import fft
-from sklearn.decomposition import PCA
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.neural_network import MLPClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.multiclass import OneVsRestClassifier
-from tqdm import tqdm
-from models.base_model import ClassificationModel
-import pickle
-import numpy as np
-from tqdm import tqdm
+import multiprocessing
 import os
-import time
+import pickle
+from collections import Counter
+
 import numpy as np
-import pandas as pd
-import scipy.io as sio
-from scipy.fftpack import fft
-from sklearn.ensemble import RandomForestClassifier
 import pywt
 import scipy.stats
-import multiprocessing
-import datetime as dt
-from collections import defaultdict, Counter
-from sklearn.metrics import roc_auc_score
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.multiclass import OneVsRestClassifier
 from sklearn.preprocessing import StandardScaler
+from tqdm import tqdm
+
+from models.base_model import ClassificationModel
 
 def calculate_entropy(list_values):
     counter_values = Counter(list_values).most_common()
@@ -65,9 +55,12 @@ def get_single_ecg_features(signal, waveletname='db6'):
         features.append(channel_features)
     return np.array(features).flatten()
 
-def get_ecg_features(ecg_data, parallel=True):
-    if parallel:
-        with multiprocessing.Pool(18) as pool:
+def get_ecg_features(ecg_data, parallel=True, workers=None):
+    workers = min(18, os.cpu_count() or 1) if workers is None else int(workers)
+    if workers < 1:
+        raise ValueError('workers must be positive')
+    if parallel and workers > 1:
+        with multiprocessing.Pool(workers) as pool:
             return np.array(pool.map(get_single_ecg_features, ecg_data))
     else:
         list_features = []

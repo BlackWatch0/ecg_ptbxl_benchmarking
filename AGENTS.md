@@ -25,6 +25,7 @@
 │   └── taskmanager/                # 可跟踪的 taskmanager YAML 配置
 ├── evaluation/                     # 与训练解耦的统一评估、adapter、指标和报告
 ├── docs/TASK_MANAGER_CONFIG.md     # taskmanager YAML 全量参数参考
+├── docs/DEPENDENCIES.md             # AWS 现代依赖与 runtime 隔离
 ├── environments/
 │   ├── ecg-training.yml            # Python 3.10 直接训练环境
 │   └── legacy/                     # Python 3.8/FastAI v1 历史环境快照
@@ -171,6 +172,8 @@ conda activate ecg-training
 ```
 
 legacy 文件用于复现，不是当前开发环境，不应把其中 Python 3.8、PyTorch 1.4 或 FastAI v1 约束传播到新代码。
+
+当前环境中 PyTorch 使用 CUDA 12.1，Wavelet+NN 使用 `tensorflow-cpu==2.15.1`。taskmanager 对 Wavelet 子进程设置 `CUDA_VISIBLE_DEVICES=-1` 并限制 BLAS 线程；不要安装 TensorFlow GPU 包或让 legacy 环境使用 A10G。
 
 ## 测试
 
