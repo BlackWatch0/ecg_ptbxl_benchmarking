@@ -31,6 +31,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CLASS_NAMES = ['NORM', 'MI', 'STTC', 'CD', 'HYP']
 SNR_SCENARIOS = [('clean', None), ('snr24', 24), ('snr12', 12), ('snr6', 6),
                  ('snr0', 0), ('snrm6', -6)]
+HISTORY_ACCURACY_THRESHOLD = .5
 EXPERIMENTS = {
     'xresnet1d101_baseline': dict(use_cbam=False, use_se=False, use_emd=False, fusion_type='none'),
     'cbam_xresnet1d101': dict(use_cbam=True, use_se=False, use_emd=False, fusion_type='none'),
@@ -397,7 +398,7 @@ def train_model(model, train_loader, valid_loader, config, device, checkpoint, h
     started = time.time()
     for epoch in range(start_epoch, config['epochs']):
         model.train()
-        train_losses = []
+        train_losses, train_correct, train_total = [], 0, 0
         for batch in train_loader:
             optimizer.zero_grad()
             if amp:
@@ -419,8 +420,11 @@ def train_model(model, train_loader, valid_loader, config, device, checkpoint, h
                 optimizer.step()
             scheduler.step()
             train_losses.append(float(loss.detach().cpu()))
+            train_correct += int(((torch.sigmoid(logits) >= HISTORY_ACCURACY_THRESHOLD) ==
+                                  labels.bool()).sum().item())
+            train_total += labels.numel()
         model.eval()
-        valid_losses = []
+        valid_losses, valid_correct, valid_total = [], 0, 0
         with torch.no_grad():
             for batch in valid_loader:
                 logits, labels = forward(model, batch, device, config['use_emd'])
@@ -428,8 +432,13 @@ def train_model(model, train_loader, valid_loader, config, device, checkpoint, h
                 if not torch.isfinite(logits).all() or not torch.isfinite(valid_loss_batch):
                     raise FloatingPointError('Non-finite validation logits or loss at epoch {}'.format(epoch + 1))
                 valid_losses.append(float(valid_loss_batch.cpu()))
+                valid_correct += int(((torch.sigmoid(logits) >= HISTORY_ACCURACY_THRESHOLD) ==
+                                      labels.bool()).sum().item())
+                valid_total += labels.numel()
         train_loss, valid_loss = float(np.mean(train_losses)), float(np.mean(valid_losses))
         history.append({'epoch': epoch + 1, 'train_loss': train_loss, 'valid_loss': valid_loss,
+                        'train_accuracy': train_correct / train_total,
+                        'valid_accuracy': valid_correct / valid_total,
                         'learning_rate': optimizer.param_groups[0]['lr']})
         pd.DataFrame(history).to_csv(history_path, index=False)
         print('{} epoch {}/{} train_loss={:.6f} valid_loss={:.6f}'.format(
@@ -684,14 +693,16 @@ def run_one(name, seed, bundle, config, output_root, device, args):
 
 
 def make_figures(output_root, summary, per_class):
-    figures = output_root / 'figures'
-    figures.mkdir(exist_ok=True)
+    figures = output_root / 'final_report' / 'figures'
+    figures.mkdir(parents=True, exist_ok=True)
     def save(name):
         plt.tight_layout(); plt.savefig(figures / (name + '.png'), dpi=150); plt.savefig(figures / (name + '.pdf')); plt.close()
     for name in summary.experiment_name.unique():
         history_files = list((output_root / 'training_logs' / name).glob('seed_*.csv')) if (output_root / 'training_logs' / name).exists() else []
         for history in history_files:
             frame = pd.read_csv(history); plt.figure(); plt.plot(frame.epoch, frame.train_loss, label='train'); plt.plot(frame.epoch, frame.valid_loss, label='valid'); plt.legend(); plt.xlabel('Epoch'); plt.ylabel('BCE loss'); plt.title(name); save('loss_' + name + '_' + history.stem)
+            if {'train_accuracy', 'valid_accuracy'}.issubset(frame.columns):
+                plt.figure(); plt.plot(frame.epoch, frame.train_accuracy, label='train'); plt.plot(frame.epoch, frame.valid_accuracy, label='valid'); plt.legend(); plt.xlabel('Epoch'); plt.ylabel('Label accuracy'); plt.title(name); save('accuracy_' + name + '_' + history.stem)
     threshold = summary[(summary.ecg_scenario == 'clean') & (summary.threshold_strategy == 'per_class_thresholds')]
     for metric, title in [('macro_roc_auc', 'Clean Macro ROC-AUC'), ('macro_f1', 'Clean Macro F1')]:
         plt.figure(figsize=(9, 4)); plt.bar(threshold.experiment_name, threshold[metric]); plt.xticks(rotation=20, ha='right'); plt.ylabel(metric); plt.title(title); save('clean_' + metric)
