@@ -1,0 +1,17 @@
+version: 1
+workflow: legacy_cbam_emd_validation_diagnosis
+
+# Archived from code/diagnose_cbam_emd.py. Not a taskmanager config.
+paths:
+  base: repository_root
+  output_root: output
+
+experiment:
+  name: exp_emd_late_fusion_superdiagnostic
+  model: cbam_xresnet1d101_late_fusion_superdiagnostic
+
+validation:
+  thresholds: [0.5, 0.3]
+  prediction_file: y_val_pred.npy
+  logits_file: y_val_logits.npy
+  output_file: validation_diagnosis.json

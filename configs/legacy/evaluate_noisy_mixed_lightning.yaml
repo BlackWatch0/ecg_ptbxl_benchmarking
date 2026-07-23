@@ -1,0 +1,29 @@
+version: 1
+workflow: legacy_lightning_noisy_mixed_evaluation
+
+# Archived from code/evaluate_noisy_mixed_lightning.py. Not a taskmanager config.
+paths:
+  base: repository_root
+  data_root: data
+  output_root: output
+
+evaluation:
+  clean_dataset: ptbxl_clean_no_noise
+  noisy_dataset: ptbxl_noisy_mixed_shared
+  test_fold: 10
+  threshold: 0.5
+  crop_length: 250
+  crop_stride: 125
+  batch_size: 128
+
+models:
+  lenet_all: {architecture: lenet, task: all, classes: 71}
+  lenet_superdiagnostic: {architecture: lenet, task: superdiagnostic, classes: 5}
+  lstm_all: {architecture: lstm, task: all, classes: 71}
+  lstm_superdiagnostic: {architecture: lstm, task: superdiagnostic, classes: 5}
+  resnet_all: {architecture: resnet, task: all, classes: 71}
+  resnet_superdiagnostic: {architecture: resnet, task: superdiagnostic, classes: 5}
+  inception_all: {architecture: inception, task: all, classes: 71}
+  inception_superdiagnostic: {architecture: inception, task: superdiagnostic, classes: 5}
+  xresnet_all: {architecture: xresnet, task: all, classes: 71}
+  xresnet_superdiagnostic: {architecture: xresnet, task: superdiagnostic, classes: 5}

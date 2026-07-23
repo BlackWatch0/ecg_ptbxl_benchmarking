@@ -1,0 +1,17 @@
+version: 1
+workflow: legacy_cbam_emd_read_only_diagnostics
+
+# Archived from code/diagnose_cbam_emd_full.py. Not a taskmanager config.
+paths:
+  base: repository_root
+  ablation_root: output/ablation_cbam_emd
+  config: configs/ablation_cbam_emd.yaml
+
+runtime:
+  seed: 42
+  device: auto
+  smoke_test: false
+
+outputs:
+  directory_pattern: cbam_emd_diagnostics_<timestamp>
+  include_zip: true

@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import warnings
 from pathlib import Path
 
 import matplotlib
@@ -228,11 +229,16 @@ def metric_mean_column(metric):
     return metric + "_mean"
 
 
-def save_figure(figures, name):
-    plt.tight_layout()
-    plt.savefig(figures / (name + ".png"), dpi=180, bbox_inches="tight")
-    plt.savefig(figures / (name + ".pdf"), bbox_inches="tight")
-    plt.close()
+def save_figure(figures, name, fig=None):
+    fig = plt.gcf() if fig is None else fig
+    fig.tight_layout()
+    fig.savefig(figures / (name + ".png"), dpi=180, bbox_inches="tight")
+    fig.savefig(figures / (name + ".pdf"), bbox_inches="tight")
+    plt.close(fig)
+
+
+def figure_slug(model):
+    return model.replace("+", "plus").lower()
 
 
 def line_plot(data, models, domain, metric, figures):
@@ -298,7 +304,28 @@ def make_plots(figures, metrics, per_class, history, complexity, models):
             plt.plot(rows.epoch, rows.train_loss, label="Training loss (seed {})".format(seed))
             plt.plot(rows.epoch, rows.valid_loss, linestyle="--", label="Validation loss (seed {})".format(seed))
         plt.xlabel("Epoch"); plt.ylabel("Loss"); plt.title("{} training history".format(DISPLAY[model])); plt.legend()
-        save_figure(figures, "training_loss_" + model.replace("+", "plus").lower())
+        save_figure(figures, "training_loss_" + figure_slug(model))
+    accuracy_columns = {"train_accuracy", "valid_accuracy"}
+    for model in models:
+        for seed, rows in history[history.model_name == model].groupby("seed"):
+            if not accuracy_columns.issubset(rows.columns) or rows[list(accuracy_columns)].isna().any().any():
+                warnings.warn(
+                    "Skipping accuracy figure for {} seed {} because history lacks complete accuracy fields".format(
+                        model, seed), RuntimeWarning)
+                continue
+            rows = rows.sort_values("epoch")
+            fig, axis = plt.subplots(figsize=(8, 5))
+            axis.plot(rows.epoch, rows.train_accuracy, label="Training accuracy")
+            axis.plot(rows.epoch, rows.valid_accuracy, linestyle="--", label="Validation accuracy")
+            axis.set_xlabel("Epoch")
+            axis.set_ylabel("Accuracy")
+            axis.set_ylim(0, 1)
+            axis.set_title("{} training and validation accuracy (seed {})".format(
+                DISPLAY[model], seed))
+            axis.legend()
+            axis.grid(True, alpha=0.3)
+            save_figure(figures, "training_validation_accuracy_{}_seed_{}".format(
+                figure_slug(model), seed), fig)
     for metric in REQUIRED_METRICS:
         comparison = means[means.domain != "clean"].pivot_table(
             index=["model_name", "snr_db"], columns="domain", values=metric).reset_index()

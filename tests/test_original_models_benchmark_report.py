@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT / "code"))
 import build_original_models_benchmark_report as report
 
 
-def synthetic_runner_output(root, include_wavelet=True):
+def synthetic_runner_output(root, include_wavelet=True, include_accuracy=True):
     models = report.MODELS if include_wavelet else report.MODELS[:-1]
     metrics, classes, histories = [], [], []
     scenarios = [("clean", None)] + [(domain, snr) for domain in ("noisy", "denoised") for snr in report.SNRS]
@@ -45,7 +45,10 @@ def synthetic_runner_output(root, include_wavelet=True):
         model_root.mkdir()
         for seed in (42, 123):
             history = [{"epoch": epoch, "train_loss": 1 / (epoch + model_index + 1),
-                        "valid_loss": 1.1 / (epoch + model_index + 1)} for epoch in (1, 2, 3)]
+                         "valid_loss": 1.1 / (epoch + model_index + 1),
+                         **({"train_accuracy": .6 + epoch / 100,
+                             "valid_accuracy": .55 + epoch / 100} if include_accuracy else {})}
+                        for epoch in (1, 2, 3)]
             pd.DataFrame(history).to_csv(model_root / "seed_{}.csv".format(seed), index=False)
 
 
@@ -72,8 +75,9 @@ class OriginalModelsBenchmarkReportTest(unittest.TestCase):
             self.assertEqual(best["best_clean"]["model_name"], "Wavelet+NN")
             self.assertEqual(best["wavelet_status"], "included")
             figure_names = {path.stem for path in (output / "figures").glob("*.png")}
-            self.assertEqual(12 + len(report.MODELS), len(figure_names))
+            self.assertEqual(12 + len(report.MODELS) + len(report.MODELS) * 2, len(figure_names))
             self.assertEqual(figure_names, {path.stem for path in (output / "figures").glob("*.pdf")})
+            self.assertIn("training_validation_accuracy_xresnet1d101_seed_42", figure_names)
             markdown = (output / "ORIGINAL_MODELS_BENCHMARK_RESULTS.md").read_text()
             self.assertIn("No metric is manually entered or estimated", markdown)
             self.assertIn("Wavelet + neural network", markdown)
@@ -94,7 +98,17 @@ class OriginalModelsBenchmarkReportTest(unittest.TestCase):
             self.assertEqual(best["wavelet_status"],
                              "unsupported_separate_pipeline: dependency unavailable in runner environment")
             self.assertIn("No Wavelet values were generated",
-                          (output / "ORIGINAL_MODELS_BENCHMARK_RESULTS.md").read_text())
+                           (output / "ORIGINAL_MODELS_BENCHMARK_RESULTS.md").read_text())
+
+    def test_old_history_without_accuracy_skips_accuracy_figures(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "runner"
+            synthetic_runner_output(root, include_accuracy=False)
+            with self.assertWarnsRegex(RuntimeWarning, "Skipping accuracy figure"):
+                output = report.build_report(root, None, [42, 123])
+            figure_names = {path.stem for path in (output / "figures").glob("*.png")}
+            self.assertFalse(any(name.startswith("training_validation_accuracy_")
+                                 for name in figure_names))
 
     def test_rejects_missing_domain_snr_and_seed_combinations(self):
         with tempfile.TemporaryDirectory() as directory:

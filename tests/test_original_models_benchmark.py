@@ -17,8 +17,9 @@ from models.original_model_factory import (MODEL_NAMES, build_original_model,
 from run_original_models_benchmark import (CLASS_NAMES, WAVELET_BATCH_SIZE,
                                            WAVELET_EPOCHS,
                                            WAVELET_FEATURE_COUNT, CropDataset,
-                                           build_loader,
-                                           cache_wavelet_features,
+                                            build_loader,
+                                            binary_label_accuracy,
+                                            cache_wavelet_features,
                                            load_manifest_scenario,
                                            predict_crops, train_model,
                                            train_wavelet_classifier)
@@ -111,6 +112,12 @@ def test_wavelet_feature_cache_is_id_aligned_and_reused(tmp_path):
         cache_wavelet_features(waveforms, ids[::-1], 'clean', tmp_path, extract)
 
 
+def test_binary_label_accuracy_uses_fixed_threshold_for_all_labels():
+    probabilities = np.array([[.5, .49, .8], [.1, .51, .5]], dtype=np.float32)
+    targets = np.array([[1, 0, 1], [0, 1, 0]], dtype=np.float32)
+    assert binary_label_accuracy(probabilities, targets) == pytest.approx(5 / 6)
+
+
 def test_wavelet_training_uses_train_only_scaler_and_original_schedule(tmp_path, monkeypatch):
     fit_calls, loaded = [], []
 
@@ -135,6 +142,9 @@ def test_wavelet_training_uses_train_only_scaler_and_original_schedule(tmp_path,
         def evaluate(self, features, labels, verbose=0):
             return .3
 
+        def predict(self, features, batch_size, verbose=0):
+            return np.zeros((len(features), 5), dtype=np.float32)
+
     model = FakeModel()
     fake_tf = SimpleNamespace(keras=SimpleNamespace(
         callbacks=SimpleNamespace(Callback=Callback, ModelCheckpoint=ModelCheckpoint),
@@ -154,6 +164,7 @@ def test_wavelet_training_uses_train_only_scaler_and_original_schedule(tmp_path,
     assert fit_calls[0][1]['epochs'] == WAVELET_EPOCHS
     assert fit_calls[0][1]['batch_size'] == WAVELET_BATCH_SIZE
     assert fit_calls[0][1]['initial_epoch'] == 0
+    assert {'train_accuracy', 'valid_accuracy'}.issubset(pd.read_csv(history).columns)
 
     train_wavelet_classifier(
         train, labels, valid, labels[:1], checkpoint, history, 42, resume=True)

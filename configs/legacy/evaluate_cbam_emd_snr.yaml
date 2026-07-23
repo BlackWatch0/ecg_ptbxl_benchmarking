@@ -1,0 +1,24 @@
+version: 1
+workflow: legacy_cbam_emd_noisy_snr_evaluation
+
+# Archived from code/evaluate_cbam_emd_snr.py. Not a taskmanager config.
+paths:
+  base: repository_root
+  data_root: data
+  output_root: output
+
+experiment:
+  name: exp_emd_late_fusion_superdiagnostic
+  model: cbam_xresnet1d101_late_fusion_superdiagnostic
+  model_config: conf_cbam_xresnet1d101_late_fusion_superdiagnostic
+
+evaluation:
+  sampling_rate: 100
+  test_fold: 10
+  thresholds: [0.5, 0.3]
+  snr_scenarios:
+    - {name: snr24, db: 24}
+    - {name: snr12, db: 12}
+    - {name: snr6, db: 6}
+    - {name: snr0, db: 0}
+    - {name: snrm6, db: -6}

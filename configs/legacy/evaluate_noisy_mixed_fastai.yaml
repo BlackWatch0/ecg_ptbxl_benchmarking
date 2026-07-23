@@ -1,0 +1,21 @@
+version: 1
+workflow: legacy_fastai_noisy_mixed_evaluation
+
+# Archived from code/evaluate_noisy_mixed_fastai.py. Requires FastAI v1.
+paths:
+  base: repository_root
+  data_root: data
+  output_root: output
+
+experiment:
+  name: exp0
+  model: fastai_xresnet1d101
+  result_root: output/noisy_mixed_shared/fastai_xresnet1d101
+
+evaluation:
+  clean_dataset: ptbxl_clean_no_noise
+  noisy_dataset: ptbxl_noisy_mixed_shared
+  test_fold: 10
+  threshold: 0.5
+  task: all
+  superclass_task: superdiagnostic

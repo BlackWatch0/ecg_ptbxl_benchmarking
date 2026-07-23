@@ -40,6 +40,7 @@ WAVELET_DISPLAY_NAME = 'Wavelet+NN'
 WAVELET_FEATURE_COUNT = 12 * 6 * 12
 WAVELET_EPOCHS = 30
 WAVELET_BATCH_SIZE = 128
+HISTORY_ACCURACY_THRESHOLD = 0.5
 
 
 class CropDataset(Dataset):
@@ -535,6 +536,7 @@ def train_model(model, train_loader, valid_loader, config, device, best_path,
     for epoch in range(start_epoch, config['epochs']):
         model.train()
         train_losses = []
+        train_correct, train_total = 0, 0
         for batch_index, (ecg, labels, _) in enumerate(train_loader, start=1):
             ecg, labels = ecg.to(device), labels.to(device)
             optimizer.zero_grad(set_to_none=True)
@@ -559,6 +561,9 @@ def train_model(model, train_loader, valid_loader, config, device, best_path,
                 optimizer.step()
             scheduler.step()
             train_losses.append(float(loss.detach().cpu()))
+            train_correct += int(((torch.sigmoid(logits) >= HISTORY_ACCURACY_THRESHOLD) ==
+                                  labels.bool()).sum().item())
+            train_total += labels.numel()
             if batch_index % 100 == 0:
                 message = '{} epoch {}/{} batch {}/{} mean_loss={:.6f}'.format(
                     config['model_name'], epoch + 1, config['epochs'], batch_index,
@@ -569,6 +574,7 @@ def train_model(model, train_loader, valid_loader, config, device, best_path,
                 print(message)
         model.eval()
         valid_losses = []
+        valid_correct, valid_total = 0, 0
         print('{} validation start'.format(config['model_name']))
         with torch.no_grad():
             for ecg, labels, _ in valid_loader:
@@ -577,11 +583,18 @@ def train_model(model, train_loader, valid_loader, config, device, best_path,
                 if not torch.isfinite(loss):
                     raise FloatingPointError('Non-finite validation loss at epoch {}'.format(epoch + 1))
                 valid_losses.append(float(loss.cpu()))
+                valid_correct += int(((torch.sigmoid(logits) >= HISTORY_ACCURACY_THRESHOLD) ==
+                                      labels.bool()).sum().item())
+                valid_total += labels.numel()
         print('{} validation complete'.format(config['model_name']))
         valid_loss = float(np.mean(valid_losses))
         train_loss = float(np.mean(train_losses))
+        train_accuracy = train_correct / train_total
+        valid_accuracy = valid_correct / valid_total
         history.append({'epoch': epoch + 1, 'train_loss': train_loss,
                         'valid_loss': valid_loss,
+                        'train_accuracy': train_accuracy,
+                        'valid_accuracy': valid_accuracy,
                         'learning_rate': optimizer.param_groups[0]['lr']})
         _atomic_csv_save(pd.DataFrame(history), history_path)
         if valid_loss < best_loss:
@@ -599,8 +612,10 @@ def train_model(model, train_loader, valid_loader, config, device, best_path,
             'config': config,
         }
         _atomic_torch_save(state, last_path)
-        print('{} epoch {}/{} train_loss={:.6f} valid_loss={:.6f}'.format(
-            config['model_name'], epoch + 1, config['epochs'], train_loss, valid_loss))
+        print('{} epoch {}/{} train_loss={:.6f} valid_loss={:.6f} '
+              'train_accuracy={:.6f} valid_accuracy={:.6f}'.format(
+                  config['model_name'], epoch + 1, config['epochs'], train_loss, valid_loss,
+                  train_accuracy, valid_accuracy))
     return best_epoch, best_loss, elapsed + time.time() - started
 
 
@@ -705,6 +720,13 @@ def _tensorflow():
     return tf
 
 
+def binary_label_accuracy(probabilities, targets, threshold=HISTORY_ACCURACY_THRESHOLD):
+    probabilities, targets = np.asarray(probabilities), np.asarray(targets)
+    if probabilities.shape != targets.shape:
+        raise ValueError('Probability and target shapes must match for accuracy')
+    return float(((probabilities >= threshold) == targets.astype(bool)).mean())
+
+
 def train_wavelet_classifier(train_features, train_labels, val_features, val_labels,
                              checkpoint_dir, history_path, seed, resume=False,
                              evaluate_only=False, epochs=WAVELET_EPOCHS,
@@ -751,10 +773,14 @@ def train_wavelet_classifier(train_features, train_labels, val_features, val_lab
         class HistoryCheckpoint(tf.keras.callbacks.Callback):
             def on_epoch_end(self, epoch, logs=None):
                 logs = logs or {}
+                train_probabilities = np.asarray(model.predict(train_scaled, batch_size=batch_size, verbose=0))
+                valid_probabilities = np.asarray(model.predict(val_scaled, batch_size=batch_size, verbose=0))
                 row = pd.DataFrame([{
                     'model_name': WAVELET_DISPLAY_NAME, 'seed': seed,
                     'epoch': epoch + 1, 'train_loss': float(logs['loss']),
                     'valid_loss': float(logs['val_loss']),
+                    'train_accuracy': binary_label_accuracy(train_probabilities, train_labels),
+                    'valid_accuracy': binary_label_accuracy(valid_probabilities, val_labels),
                 }])
                 existing = pd.read_csv(history_path) if history_path.exists() else pd.DataFrame()
                 updated = pd.concat([existing, row], ignore_index=True).drop_duplicates(

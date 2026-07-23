@@ -93,6 +93,10 @@ def test_dry_run_writes_commands_status_and_logs_without_training(tmp_path):
         expected = "11" if model == "xresnet1d101" else "7"
         assert run["command"][seed_index + 1] == expected
     assert (output / "config" / "resolved_config.yaml").is_file()
+    progress = (output / "task_plan_progress.log").read_text(encoding="utf-8")
+    assert "TASKMANAGER_START" in progress
+    assert "TASK_PLANNED task=evaluate type=evaluate" in progress
+    assert "RUN_START task=evaluate run=xresnet1d101_seed_11" in progress
 
 
 def test_dry_run_does_not_replace_runtime_status(tmp_path):
@@ -123,6 +127,10 @@ def test_execution_uses_one_safe_subprocess_per_model(tmp_path, monkeypatch):
     assert all(call[0][0] == sys.executable for call in calls)
     assert all(call[1]["shell"] is False for call in calls)
     assert all("--skip-test-evaluation" in call[0] for call in calls)
+    progress = (Path(config["output_dir"]) / "task_progress.log").read_text(encoding="utf-8")
+    assert "TASK_START task=train type=train" in progress
+    assert "RUN_COMPLETED task=train run=xresnet1d101_seed_7 returncode=0" in progress
+    assert "TASKMANAGER_COMPLETED" in progress
 
 
 def test_wavelet_process_is_cpu_only(tmp_path, monkeypatch):
