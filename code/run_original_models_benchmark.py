@@ -578,8 +578,9 @@ def train_model(model, train_loader, valid_loader, config, device, best_path,
         print('{} validation start'.format(config['model_name']))
         with torch.no_grad():
             for ecg, labels, _ in valid_loader:
-                logits = model(ecg.to(device))
-                loss = criterion(logits, labels.to(device))
+                ecg, labels = ecg.to(device), labels.to(device)
+                logits = model(ecg)
+                loss = criterion(logits, labels)
                 if not torch.isfinite(loss):
                     raise FloatingPointError('Non-finite validation loss at epoch {}'.format(epoch + 1))
                 valid_losses.append(float(loss.cpu()))
