@@ -1,5 +1,8 @@
 # Taskmanager
 
+完整 YAML 字段、默认值、参数优先级和每种 task 的可选参数见
+[`TASK_MANAGER_CONFIG.md`](TASK_MANAGER_CONFIG.md)。
+
 ## 范围
 
 仓库根入口为 `taskmanager.py`，实现位于 `code/task_manager/`。它只编排原作者七模型基准的五类 Python 任务：

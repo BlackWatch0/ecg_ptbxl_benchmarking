@@ -24,6 +24,7 @@
 ├── configs/                        # 数据资产、消融和统一评估配置
 │   └── taskmanager/                # 可跟踪的 taskmanager YAML 配置
 ├── evaluation/                     # 与训练解耦的统一评估、adapter、指标和报告
+├── docs/TASK_MANAGER_CONFIG.md     # taskmanager YAML 全量参数参考
 ├── environments/
 │   ├── ecg-training.yml            # Python 3.10 直接训练环境
 │   └── legacy/                     # Python 3.8/FastAI v1 历史环境快照

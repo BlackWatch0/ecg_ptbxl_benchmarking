@@ -16,6 +16,7 @@
 | 文档 | 内容 |
 |---|---|
 | [任务管理](docs/TASK_MANAGER.md) | taskmanager 命令、配置、状态与执行边界 |
+| [YAML 参数参考](docs/TASK_MANAGER_CONFIG.md) | 所有可选字段、默认值、优先级与 task 参数 |
 | [AWS 部署](docs/AWS_SETUP.md) | EC2、加密 gp3 EBS、SSM、环境和人工 S3 同步 |
 | [数据资产](docs/DATA_ASSETS.md) | 数据来源、目录契约、对齐要求和 blocked 资产 |
 | [工作流](docs/WORKFLOWS.md) | 当前 Python 入口、smoke、resume、日志和输出 |
