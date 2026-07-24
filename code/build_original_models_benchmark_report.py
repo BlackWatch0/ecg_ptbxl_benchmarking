@@ -238,7 +238,7 @@ def save_figure(figures, name, fig=None):
 
 
 def figure_slug(model):
-    return model.replace("+", "plus").lower()
+    return "wavelet_nn" if model == WAVELET_MODEL else model.replace("+", "plus").lower()
 
 
 def line_plot(data, models, domain, metric, figures):
@@ -256,6 +256,7 @@ def line_plot(data, models, domain, metric, figures):
 
 def make_plots(figures, metrics, per_class, history, complexity, models):
     figures.mkdir(parents=True, exist_ok=True)
+    figure_status = {}
     means = metrics.groupby(["model_name", "domain", "snr_db"], dropna=False)[REQUIRED_METRICS].mean().reset_index()
     clean = means[means.domain == "clean"].set_index("model_name")
     for domain in ("noisy", "denoised"):
@@ -305,6 +306,7 @@ def make_plots(figures, metrics, per_class, history, complexity, models):
             plt.plot(rows.epoch, rows.valid_loss, linestyle="--", label="Validation loss (seed {})".format(seed))
         plt.xlabel("Epoch"); plt.ylabel("Loss"); plt.title("{} training history".format(DISPLAY[model])); plt.legend()
         save_figure(figures, "training_loss_" + figure_slug(model))
+        figure_status["training_loss_" + figure_slug(model)] = "generated"
     accuracy_columns = {"train_accuracy", "valid_accuracy"}
     for model in models:
         for seed, rows in history[history.model_name == model].groupby("seed"):
@@ -312,6 +314,8 @@ def make_plots(figures, metrics, per_class, history, complexity, models):
                 warnings.warn(
                     "Skipping accuracy figure for {} seed {} because history lacks complete accuracy fields".format(
                         model, seed), RuntimeWarning)
+                figure_status["training_validation_accuracy_{}_seed_{}".format(
+                    figure_slug(model), seed)] = "missing_history_accuracy"
                 continue
             rows = rows.sort_values("epoch")
             fig, axis = plt.subplots(figsize=(8, 5))
@@ -326,6 +330,20 @@ def make_plots(figures, metrics, per_class, history, complexity, models):
             axis.grid(True, alpha=0.3)
             save_figure(figures, "training_validation_accuracy_{}_seed_{}".format(
                 figure_slug(model), seed), fig)
+            figure_status["training_validation_accuracy_{}_seed_{}".format(
+                figure_slug(model), seed)] = "generated"
+            if "learning_rate" in rows and rows.learning_rate.notna().all():
+                fig, axis = plt.subplots(figsize=(8, 5))
+                axis.plot(rows.epoch, rows.learning_rate)
+                axis.set_xlabel("Epoch"); axis.set_ylabel("Learning rate")
+                axis.set_title("{} learning rate (seed {})".format(DISPLAY[model], seed))
+                axis.grid(True, alpha=0.3)
+                name = "learning_rate_{}_seed_{}".format(figure_slug(model), seed)
+                save_figure(figures, name, fig)
+                figure_status[name] = "generated"
+            else:
+                figure_status["learning_rate_{}_seed_{}".format(
+                    figure_slug(model), seed)] = "not_applicable_or_missing"
     for metric in REQUIRED_METRICS:
         comparison = means[means.domain != "clean"].pivot_table(
             index=["model_name", "snr_db"], columns="domain", values=metric).reset_index()
@@ -338,6 +356,10 @@ def make_plots(figures, metrics, per_class, history, complexity, models):
         plt.xlabel("Noisy ECG {}".format(METRIC_LABELS[metric])); plt.ylabel("Denoised ECG {}".format(METRIC_LABELS[metric]))
         plt.title("Noisy versus denoised ECG"); plt.legend(fontsize=7, ncol=2)
         save_figure(figures, "noisy_vs_denoised_" + metric)
+    manifest = figures.parent.parent / "manifest"
+    manifest.mkdir(parents=True, exist_ok=True)
+    (manifest / "figure_generation_status.json").write_text(
+        json.dumps(figure_status, indent=2) + "\n", encoding="utf-8")
 
 
 def markdown_table(frame):

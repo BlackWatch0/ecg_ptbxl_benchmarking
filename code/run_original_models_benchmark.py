@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import torch
 import wfdb
+import yaml
 from sklearn.metrics import (average_precision_score, f1_score, precision_score,
                              recall_score, roc_auc_score)
 from sklearn.preprocessing import MultiLabelBinarizer, StandardScaler
@@ -29,6 +30,7 @@ from models.original_model_factory import (BENCHMARK_MODEL_NAMES, MODEL_NAMES,
                                            default_learning_rate)
 from utils import utils
 from utils import data_assets
+from utils import experiment_artifacts
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -130,9 +132,7 @@ def set_seed(seed):
 
 
 def prepare_directories(root):
-    for name in ('config', 'checkpoints', 'training_logs', 'predictions',
-                 'metrics', 'errors'):
-        (root / name).mkdir(parents=True, exist_ok=True)
+    experiment_artifacts.prepare_experiment_root(root)
 
 
 def load_clean_data(data_root, output_root):
@@ -177,6 +177,18 @@ def load_clean_data(data_root, output_root):
         'standardization': 'one global scalar mean/std fit on clean folds 1-8 only',
     }
     json_dump(output_root / 'config' / 'data_integrity.json', integrity)
+    json_dump(output_root / 'config' / 'dataset_manifest.json', {
+        'dataset_root': str(clean_root), 'metadata_file': metadata_filename,
+        'record_count': len(labels), 'class_names': CLASS_NAMES,
+    })
+    json_dump(output_root / 'config' / 'split_manifest.json', {
+        'train_records': len(splits['train']['ids']),
+        'validation_records': len(splits['val']['ids']),
+        'test_records': len(splits['test']['ids']),
+        'train_ids': [int(value) for value in splits['train']['ids']],
+        'validation_ids': [int(value) for value in splits['val']['ids']],
+        'test_ids': [int(value) for value in splits['test']['ids']],
+    })
     return splits
 
 
@@ -231,6 +243,24 @@ def load_official_raw_data(data_root, output_root, cache_dir=None):
     splits['train']['ecg'], splits['val']['ecg'], splits['test']['ecg'] = \
         utils.preprocess_signals(splits['train']['ecg'], splits['val']['ecg'],
                                  splits['test']['ecg'], str(output_root / 'config') + '/')
+    integrity = {
+        'class_names': CLASS_NAMES, 'train_folds': list(range(1, 9)),
+        'validation_fold': 9, 'test_fold': 10, 'train_records': len(splits['train']['ids']),
+        'validation_records': len(splits['val']['ids']), 'test_records': len(splits['test']['ids']),
+        'split_overlap': False, 'standardization': 'one global scalar mean/std fit on clean folds 1-8 only',
+    }
+    json_dump(output_root / 'config' / 'data_integrity.json', integrity)
+    json_dump(output_root / 'config' / 'dataset_manifest.json', {
+        'dataset_root': str(official_root), 'metadata_file': 'ptbxl_database.csv',
+        'record_count': len(labels), 'class_names': CLASS_NAMES,
+    })
+    json_dump(output_root / 'config' / 'split_manifest.json', {
+        'train_records': len(splits['train']['ids']), 'validation_records': len(splits['val']['ids']),
+        'test_records': len(splits['test']['ids']),
+        'train_ids': [int(value) for value in splits['train']['ids']],
+        'validation_ids': [int(value) for value in splits['val']['ids']],
+        'test_ids': [int(value) for value in splits['test']['ids']],
+    })
     return splits
 
 
@@ -534,6 +564,7 @@ def train_model(model, train_loader, valid_loader, config, device, best_path,
         print('Resuming at true epoch {}/{}'.format(start_epoch, config['epochs']))
     started = time.time()
     for epoch in range(start_epoch, config['epochs']):
+        epoch_started = time.time()
         model.train()
         train_losses = []
         train_correct, train_total = 0, 0
@@ -592,16 +623,18 @@ def train_model(model, train_loader, valid_loader, config, device, best_path,
         train_loss = float(np.mean(train_losses))
         train_accuracy = train_correct / train_total
         valid_accuracy = valid_correct / valid_total
-        history.append({'epoch': epoch + 1, 'train_loss': train_loss,
-                        'valid_loss': valid_loss,
-                        'train_accuracy': train_accuracy,
-                        'valid_accuracy': valid_accuracy,
-                        'learning_rate': optimizer.param_groups[0]['lr']})
-        _atomic_csv_save(pd.DataFrame(history), history_path)
         if valid_loss < best_loss:
             best_loss, best_epoch = valid_loss, epoch + 1
             _atomic_torch_save({'model': model.state_dict(), 'epoch': best_epoch,
                                 'best_valid_loss': best_loss, 'config': config}, best_path)
+        history.append({'epoch': epoch + 1, 'train_loss': train_loss,
+                        'valid_loss': valid_loss, 'validation_loss': valid_loss,
+                        'train_accuracy': train_accuracy,
+                        'valid_accuracy': valid_accuracy,
+                        'learning_rate': optimizer.param_groups[0]['lr'],
+                        'epoch_duration_seconds': time.time() - epoch_started,
+                        'best_epoch_so_far': best_epoch})
+        _atomic_csv_save(pd.DataFrame(history), history_path)
         total_elapsed = elapsed + time.time() - started
         state = {
             'model': model.state_dict(), 'optimizer': optimizer.state_dict(),
@@ -655,6 +688,21 @@ def threshold_results(y_true, probabilities):
     return global_threshold, per_class, curve
 
 
+def validation_metric_summary(y_true, probabilities, validation_loss):
+    prediction = (probabilities >= .5).astype(int)
+    roc = [_safe_metric(roc_auc_score, y_true[:, index], probabilities[:, index])
+           for index in range(len(CLASS_NAMES))]
+    f1 = [float(f1_score(y_true[:, index], prediction[:, index], zero_division=0))
+          for index in range(len(CLASS_NAMES))]
+    return prediction, {
+        'threshold': .5, 'loss': validation_loss,
+        'macro_roc_auc': float(np.nanmean(roc)),
+        'macro_f1': float(f1_score(y_true, prediction, average='macro', zero_division=0)),
+        'per_class': {name: {'roc_auc': roc[index], 'f1': f1[index]}
+                      for index, name in enumerate(CLASS_NAMES)},
+    }
+
+
 def _safe_metric(function, y_true, y_prob):
     return float(function(y_true, y_prob)) if len(np.unique(y_true)) == 2 else np.nan
 
@@ -697,13 +745,9 @@ def metric_rows(y_true, probabilities, prediction, metadata):
     return overall, per_class
 
 
-def save_predictions(path, ids, y_true, probabilities, prediction):
-    frame = pd.DataFrame({'record_id': ids, 'ecg_id': ids})
-    for index, name in enumerate(CLASS_NAMES):
-        frame['true_' + name] = y_true[:, index].astype(int)
-        frame['prob_' + name] = probabilities[:, index]
-        frame['pred_' + name] = prediction[:, index].astype(int)
-    frame.to_csv(path, index=False)
+def save_predictions(path, ids, y_true, probabilities, prediction, thresholds=.5):
+    experiment_artifacts.save_predictions(path, ids, y_true, probabilities, prediction,
+                                          thresholds)
 
 
 def count_parameters(model):
@@ -772,18 +816,31 @@ def train_wavelet_classifier(train_features, train_labels, val_features, val_lab
     started = time.time()
     if not evaluate_only and initial_epoch < epochs:
         class HistoryCheckpoint(tf.keras.callbacks.Callback):
+            def __init__(self):
+                super().__init__()
+                self.epoch_started = None
+
+            def on_epoch_begin(self, epoch, logs=None):
+                self.epoch_started = time.time()
+
             def on_epoch_end(self, epoch, logs=None):
                 logs = logs or {}
                 train_probabilities = np.asarray(model.predict(train_scaled, batch_size=batch_size, verbose=0))
                 valid_probabilities = np.asarray(model.predict(val_scaled, batch_size=batch_size, verbose=0))
+                existing = pd.read_csv(history_path) if history_path.exists() else pd.DataFrame()
+                previous_best = (float(existing.valid_loss.min()) if len(existing) else np.inf)
                 row = pd.DataFrame([{
                     'model_name': WAVELET_DISPLAY_NAME, 'seed': seed,
                     'epoch': epoch + 1, 'train_loss': float(logs['loss']),
-                    'valid_loss': float(logs['val_loss']),
+                    'valid_loss': float(logs['val_loss']), 'validation_loss': float(logs['val_loss']),
                     'train_accuracy': binary_label_accuracy(train_probabilities, train_labels),
                     'valid_accuracy': binary_label_accuracy(valid_probabilities, val_labels),
+                    'learning_rate': None,
+                    'epoch_duration_seconds': (time.time() - self.epoch_started
+                                               if self.epoch_started is not None else None),
+                    'best_epoch_so_far': (epoch + 1 if float(logs['val_loss']) <= previous_best
+                                          else int(existing.loc[existing.valid_loss.idxmin(), 'epoch'])),
                 }])
-                existing = pd.read_csv(history_path) if history_path.exists() else pd.DataFrame()
                 updated = pd.concat([existing, row], ignore_index=True).drop_duplicates(
                     'epoch', keep='last').sort_values('epoch')
                 temporary = history_path.with_suffix('.csv.tmp')
@@ -835,6 +892,7 @@ def run_wavelet(seed, splits, scenarios, output_root, args):
     for directory in (checkpoint_dir, metric_dir, prediction_dir, log_dir):
         directory.mkdir(parents=True, exist_ok=True)
     history_path = log_dir / 'seed_{}.csv'.format(seed)
+    experiment_artifacts.write_runtime_log(output_root, run_name, seed, 'RUN_START wavelet')
     set_seed(seed)
     train_features = cache_wavelet_features(
         splits['train']['ecg'], splits['train']['ids'], 'train', output_root)
@@ -849,6 +907,10 @@ def run_wavelet(seed, splits, scenarios, output_root, args):
     val_prob, _ = predict_wavelet(
         model, scaler, val_features, batch_size=args.wavelet_batch_size)
     val_y = splits['val']['labels']
+    val_prediction, validation_metrics = validation_metric_summary(val_y, val_prob, best_loss)
+    json_dump(metric_dir / 'seed_{}_validation_metrics.json'.format(seed), validation_metrics)
+    save_predictions(prediction_dir / 'validation_predictions_threshold_0_5.csv',
+                     splits['val']['ids'], val_y, val_prob, val_prediction, .5)
     global_threshold, per_class_thresholds, curve = threshold_results(val_y, val_prob)
     json_dump(checkpoint_dir / 'thresholds.json', {
         'threshold_0.5': .5, 'best_global_threshold': global_threshold,
@@ -859,7 +921,7 @@ def run_wavelet(seed, splits, scenarios, output_root, args):
         metric_dir / 'seed_{}_threshold_search.csv'.format(seed), index=False)
     per_class_array = np.array([per_class_thresholds[name] for name in CLASS_NAMES])
     save_predictions(prediction_dir / 'validation_predictions.csv', splits['val']['ids'],
-                     val_y, val_prob, (val_prob >= per_class_array).astype(int))
+                     val_y, val_prob, (val_prob >= per_class_array).astype(int), per_class_array)
     if args.skip_test_evaluation:
         return
     all_scenarios = [('clean', None, splits['test']['ecg'], {
@@ -905,10 +967,11 @@ def run_wavelet(seed, splits, scenarios, output_root, args):
             strategy_slug = strategy.replace('threshold_', '')
             save_predictions(prediction_dir / 'test_predictions_{}_{}.csv'.format(
                 scenario, strategy_slug), splits['test']['ids'], y_test,
-                probabilities, prediction)
+                probabilities, prediction, threshold)
             if strategy == 'per_class_thresholds':
                 save_predictions(prediction_dir / 'test_predictions_{}.csv'.format(scenario),
-                                 splits['test']['ids'], y_test, probabilities, prediction)
+                                 splits['test']['ids'], y_test, probabilities, prediction,
+                                 per_class_array)
     pd.DataFrame(all_overall).to_csv(metric_dir / 'seed_{}.csv'.format(seed), index=False)
     pd.DataFrame(all_per_class).to_csv(metric_dir / 'seed_{}_per_class.csv'.format(seed), index=False)
     model_info = {
@@ -920,8 +983,13 @@ def run_wavelet(seed, splits, scenarios, output_root, args):
         'status': 'completed',
     }
     json_dump(checkpoint_dir / 'model_info.json', model_info)
+    experiment_artifacts.write_checkpoint_metadata(
+        checkpoint_dir, run_name, seed, best_path, checkpoint_dir / 'last_model.keras',
+        {'wavelet_epochs': args.wavelet_epochs, 'wavelet_batch_size': args.wavelet_batch_size},
+        best_epoch, best_loss, validation_metrics)
     pd.DataFrame([model_info]).to_csv(
         metric_dir / 'seed_{}_complexity.csv'.format(seed), index=False)
+    experiment_artifacts.write_runtime_log(output_root, run_name, seed, 'RUN_COMPLETED wavelet')
 
 
 def run_one(model_name, seed, splits, scenarios, config, output_root, device, args):
@@ -936,6 +1004,7 @@ def run_one(model_name, seed, splits, scenarios, config, output_root, device, ar
     best_path = checkpoint_dir / 'checkpoint.pth'
     last_path = checkpoint_dir / 'last_checkpoint.pth'
     history_path = log_dir / 'seed_{}.csv'.format(seed)
+    experiment_artifacts.write_runtime_log(output_root, run_name, seed, 'RUN_START')
     set_seed(seed)
     actual_batch_size = config['batch_size']
     training_seconds = None
@@ -996,22 +1065,10 @@ def run_one(model_name, seed, splits, scenarios, config, output_root, device, ar
         splits['val'], False, actual_batch_size, crop_length=config['crop_length'],
         num_workers=args.num_workers)
     val_prob, val_y, _ = predict_crops(model, val_loader, device, len(splits['val']['ids']))
-    val_prediction = (val_prob >= .5).astype(int)
-    val_roc = [_safe_metric(roc_auc_score, val_y[:, index], val_prob[:, index])
-               for index in range(len(CLASS_NAMES))]
-    val_f1 = [float(f1_score(val_y[:, index], val_prediction[:, index], zero_division=0))
-              for index in range(len(CLASS_NAMES))]
-    validation_metrics = {
-        'threshold': .5,
-        'loss': best_loss,
-        'macro_roc_auc': float(np.nanmean(val_roc)),
-        'macro_f1': float(f1_score(val_y, val_prediction, average='macro', zero_division=0)),
-        'per_class': {name: {'roc_auc': val_roc[index], 'f1': val_f1[index]}
-                      for index, name in enumerate(CLASS_NAMES)},
-    }
+    val_prediction, validation_metrics = validation_metric_summary(val_y, val_prob, best_loss)
     json_dump(metric_dir / 'seed_{}_validation_metrics.json'.format(seed), validation_metrics)
     save_predictions(prediction_dir / 'validation_predictions_threshold_0_5.csv',
-                     splits['val']['ids'], val_y, val_prob, val_prediction)
+                     splits['val']['ids'], val_y, val_prob, val_prediction, .5)
     global_threshold, per_class_thresholds, curve = threshold_results(val_y, val_prob)
     json_dump(checkpoint_dir / 'thresholds.json', {
         'threshold_0.5': .5, 'best_global_threshold': global_threshold,
@@ -1024,7 +1081,7 @@ def run_one(model_name, seed, splits, scenarios, config, output_root, device, ar
         return
     per_class_array = np.array([per_class_thresholds[name] for name in CLASS_NAMES])
     save_predictions(prediction_dir / 'validation_predictions.csv', splits['val']['ids'],
-                     val_y, val_prob, (val_prob >= per_class_array).astype(int))
+                     val_y, val_prob, (val_prob >= per_class_array).astype(int), per_class_array)
     all_scenarios = [('clean', None, splits['test']['ecg'], {
         'number_of_test_records': len(splits['test']['ids']),
         'number_of_matched_ecg_records': len(splits['test']['ids']),
@@ -1055,7 +1112,7 @@ def run_one(model_name, seed, splits, scenarios, config, output_root, device, ar
                 'trainable_parameter_count': trainable_count,
                 'inference_time_per_sample_ms': inference_ms,
                 'actual_batch_size': actual_batch_size, 'checkpoint_path': str(best_path),
-                'crop_length': CROP_LENGTH, 'crop_stride': CROP_STRIDE,
+                'crop_length': config['crop_length'], 'crop_stride': CROP_STRIDE,
                 'crop_aggregation': 'max_probability', 'status': 'completed',
             }
             overall, per_class = metric_rows(y_test, probabilities, prediction, metadata)
@@ -1063,10 +1120,11 @@ def run_one(model_name, seed, splits, scenarios, config, output_root, device, ar
             all_per_class.extend(per_class)
             strategy_slug = strategy.replace('threshold_', '')
             save_predictions(prediction_dir / 'test_predictions_{}_{}.csv'.format(
-                scenario, strategy_slug), split['ids'], y_test, probabilities, prediction)
+                scenario, strategy_slug), split['ids'], y_test, probabilities, prediction,
+                threshold)
             if strategy == 'per_class_thresholds':
                 save_predictions(prediction_dir / 'test_predictions_{}.csv'.format(scenario),
-                                 split['ids'], y_test, probabilities, prediction)
+                                 split['ids'], y_test, probabilities, prediction, per_class_array)
     pd.DataFrame(all_overall).to_csv(metric_dir / 'seed_{}.csv'.format(seed), index=False)
     pd.DataFrame(all_per_class).to_csv(metric_dir / 'seed_{}_per_class.csv'.format(seed), index=False)
     model_info = {
@@ -1078,11 +1136,15 @@ def run_one(model_name, seed, splits, scenarios, config, output_root, device, ar
         'status': 'completed',
     }
     json_dump(checkpoint_dir / 'model_info.json', model_info)
+    experiment_artifacts.write_checkpoint_metadata(
+        checkpoint_dir, run_name, seed, best_path, last_path, config, best_epoch,
+        best_loss, validation_metrics)
     pd.DataFrame([model_info]).to_csv(metric_dir / 'seed_{}_complexity.csv'.format(seed), index=False)
     del model
     gc.collect()
     if device.type == 'cuda':
         torch.cuda.empty_cache()
+    experiment_artifacts.write_runtime_log(output_root, run_name, seed, 'RUN_COMPLETED')
 
 
 def parse_args(argv=None):
@@ -1156,6 +1218,16 @@ def main(argv=None):
         },
     }
     json_dump(output_root / 'config' / 'resolved_config.json', config)
+    (output_root / 'config' / 'resolved_config.yaml').write_text(
+        yaml.safe_dump(config, sort_keys=False), encoding='utf-8')
+    json_dump(output_root / 'config' / 'artifact_status.json', {
+        'standard_scaler.pkl': {'required': True, 'reason': 'clean ECG standardizer'},
+        'mlb.pkl': {'required': True, 'reason': 'fixed superdiagnostic label encoder'},
+        'wavelet_feature_scaler': {
+            'required': WAVELET_MODEL_NAME in [canonical_model_name(name) for name in args.models],
+            'reason': 'stored in the Wavelet checkpoint directory when Wavelet+NN is selected',
+        },
+    })
     obsolete_status = output_root / 'config' / 'wavelet_nn_status.json'
     if obsolete_status.exists():
         obsolete_status.unlink()
